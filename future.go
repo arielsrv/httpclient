@@ -13,8 +13,8 @@ type Future[T any] struct {
 
 // Await blocks until the request completes and returns the response and error.
 func (r *Future[T]) Await() (HTTPResponse[T], error) {
-	response := <-r.ch
-	return response.response, response.err
+	fResult := <-r.ch
+	return fResult.response, fResult.err
 }
 
 // async runs fn in a goroutine and returns a Future that resolves with its result.
