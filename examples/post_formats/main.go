@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"httpclient"
 	"log"
-	"net/url"
 )
 
-// Order is sent both as JSON and as XML — the struct tags drive each encoding.
+// Order is sent as JSON, XML, and form — the struct tags drive each encoding.
+// XMLName is form:"-" so the form encoder skips it (it is not a real field).
 type Order struct {
-	XMLName xml.Name `json:"-" xml:"order"`
-	ID      int      `json:"id" xml:"id"`
-	Item    string   `json:"item" xml:"item"`
+	XMLName xml.Name `json:"-" xml:"order" form:"-"`
+	ID      int      `json:"id" xml:"id" form:"id"`
+	Item    string   `json:"item" xml:"item" form:"item"`
 }
 
 // httpbinResponse captures the fields of httpbin.org/post's echo that we care
@@ -32,14 +32,12 @@ func main() {
 
 	order := Order{ID: 42, Item: "book"}
 
-	// One client, three content types — the format travels with each request.
-	// Fire all three concurrently with the async verbs; total ≈ slowest request.
+	// One client, three content types, one struct — the format travels with each
+	// request and the tags drive encoding. Fire all three concurrently with the
+	// async verbs; total ≈ slowest request.
 	jsonFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.JSON(order))
 	xmlFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.XML(order))
-	formFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.Form(url.Values{
-		"id":   {"42"},
-		"item": {"book"},
-	}))
+	formFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.Form(order))
 
 	jsonResp := await(jsonFuture, "JSON")
 	fmt.Printf("JSON  → Content-Type: %s | server parsed: %v\n",

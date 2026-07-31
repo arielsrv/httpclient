@@ -260,18 +260,92 @@ func TestPost_XMLBody_And_XMLResponse(t *testing.T) {
 	assert.Equal(t, "Bob", resp.Data().Name)
 }
 
-func TestPost_FormBody(t *testing.T) {
+func TestForm_StructWithTags(t *testing.T) {
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
-	values := url.Values{"name": {"Carol"}, "age": {"30"}}
-	_, err := httpclient.NewHTTPClient().Post[any](
-		context.Background(), server.URL, httpclient.Form(values))
+	body := httpclient.Form(struct {
+		ID   int    `form:"id"`
+		Item string `form:"item"`
+	}{ID: 42, Item: "book"})
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
 	require.NoError(t, err)
 
 	assert.Equal(t, "application/x-www-form-urlencoded", captured.contentType)
-	assert.Equal(t, "Carol", captured.form.Get("name"))
-	assert.Equal(t, "30", captured.form.Get("age"))
+	assert.Equal(t, "42", captured.form.Get("id"))
+	assert.Equal(t, "book", captured.form.Get("item"))
+}
+
+func TestForm_OmitemptyDashAndFieldName(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	body := httpclient.Form(struct {
+		Query    string `form:"q"`
+		Page     int    `form:"page,omitempty"` // zero → skipped
+		Internal string `form:"-"`              // never sent
+		Untagged string // uses field name
+	}{Query: "go", Page: 0, Internal: "secret", Untagged: "x"})
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "go", captured.form.Get("q"))
+	assert.Empty(t, captured.form["page"])
+	assert.Empty(t, captured.form["-"])
+	assert.NotContains(t, string(captured.body), "secret")
+	assert.Equal(t, "x", captured.form.Get("Untagged"))
+}
+
+func TestForm_SliceRepeatsKey(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	body := httpclient.Form(struct {
+		Tags []string `form:"tag"`
+	}{Tags: []string{"a", "b"}})
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"a", "b"}, captured.form["tag"])
+}
+
+func TestForm_NilPointerSkipped(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	limit := 10
+	body := httpclient.Form(struct {
+		Limit *int `form:"limit"`
+		Cap   *int `form:"cap"`
+	}{Limit: &limit, Cap: nil})
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "10", captured.form.Get("limit"))
+	assert.Empty(t, captured.form["cap"])
+}
+
+func TestForm_NestedStructErrors(t *testing.T) {
+	body := httpclient.Form(struct {
+		Inner struct{ X int } `form:"inner"`
+	}{})
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), "http://example.com", body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encoding request body")
+	assert.Contains(t, err.Error(), "inner")
+}
+
+func TestForm_NonStructErrors(t *testing.T) {
+	body := httpclient.Form(42)
+
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), "http://example.com", body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected struct")
 }
 
 func TestPost_EncodeError(t *testing.T) {
