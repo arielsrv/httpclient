@@ -40,25 +40,33 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	return httpClient
 }
 
-func (r *HTTPClient) Get[T any](ctx context.Context, url string) (HTTPResponse[T], error) {
-	return r.createRequest[T](ctx, http.MethodGet, url)
+func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http.Header) (HTTPResponse[T], error) {
+	return r.doRequest[T](ctx, http.MethodGet, url, headers...)
 }
 
 // GetAsync fires a GET request in a goroutine and returns a Future immediately.
 // The context controls cancellation — cancelling ctx will unblock Await with an error.
-func (r *HTTPClient) GetAsync[T any](ctx context.Context, url string) *Future[T] {
+func (r *HTTPClient) GetAsync[T any](ctx context.Context, url string, headers ...http.Header) *Future[T] {
 	ch := make(chan futureResult[T], 1)
 	go func() {
-		resp, err := r.Get[T](ctx, url)
+		resp, err := r.Get[T](ctx, url, headers...)
 		ch <- futureResult[T]{response: resp, err: err}
 	}()
 	return &Future[T]{ch: ch}
 }
 
-func (r *HTTPClient) createRequest[T any](ctx context.Context, method string, url string) (result HTTPResponse[T], err error) {
+func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url string, headers ...http.Header) (result HTTPResponse[T], err error) {
 	request, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return result, fmt.Errorf("creating request: %w", err)
+	}
+
+	for _, h := range headers {
+		for key, values := range h {
+			for _, value := range values {
+				request.Header.Add(key, value)
+			}
+		}
 	}
 
 	response, err := r.lowLevelClient.Do(request)

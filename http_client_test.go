@@ -319,7 +319,23 @@ func TestRace_ConcurrentFutures(t *testing.T) {
 	}
 }
 
-// --- Coverage: error paths in createRequest ---
+func TestHTTPClient_Get_WithHeaders(t *testing.T) {
+	var received http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	headers := http.Header{
+		"Authorization": []string{"Bearer token123"},
+		"X-Request-Id":  []string{"abc-456"},
+	}
+	_, err := httpclient.NewHTTPClient().Get[any](context.Background(), server.URL, headers)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer token123", received.Get("Authorization"))
+	assert.Equal(t, "abc-456", received.Get("X-Request-Id"))
+}
 
 // TestHTTPClient_Get_InvalidURL covers the NewRequestWithContext error branch
 // (null byte makes url.Parse reject the URL).

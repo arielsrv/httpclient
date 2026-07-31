@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"httpclient"
 	"log"
+	"net/http"
 	"slices"
 )
 
@@ -21,7 +22,9 @@ func main() {
 	apiURL := fmt.Sprintf("%s/public/v2/users", baseURL)
 
 	// err only represents network-level errors (connection refused, timeout, etc.)
-	response, err := httpClient.Get[[]UserResponse](context.Background(), apiURL)
+	response, err := httpClient.Get[[]UserResponse](context.Background(), apiURL, http.Header{
+		"X-Request-Id": []string{"abc-123"},
+	})
 	if err != nil {
 		log.Fatalf("network error: %v", err)
 	}
