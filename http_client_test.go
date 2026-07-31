@@ -473,6 +473,47 @@ func TestResponse_As_UsesNegotiatedXMLCodec(t *testing.T) {
 	assert.Equal(t, "not found", decoded.Message)
 }
 
+func TestResponse_ProblemJSONNegotiatedBySuffix(t *testing.T) {
+	// RFC 7807 problem+json — the "+json" suffix must route to the JSON codec.
+	type problem struct {
+		Title  string `json:"title"`
+		Status int    `json:"status"`
+	}
+	respBody := []byte(`{"title":"Unprocessable","status":422}`)
+
+	server, _ := echoServer(t, http.StatusUnprocessableEntity, "application/problem+json", respBody)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[any](context.Background(), server.URL)
+	require.NoError(t, err)
+	require.False(t, resp.IsSuccess())
+
+	decoded, err := resp.As[problem]()
+	require.NoError(t, err)
+	assert.Equal(t, "Unprocessable", decoded.Title)
+	assert.Equal(t, 422, decoded.Status)
+}
+
+func TestResponse_ProblemXMLNegotiatedBySuffix(t *testing.T) {
+	// The "+xml" suffix must route to the XML codec — before suffix support this
+	// fell back to JSON and failed to decode.
+	type problem struct {
+		XMLName xml.Name `xml:"problem"`
+		Title   string   `xml:"title"`
+	}
+	respBody := []byte(`<problem><title>Unprocessable</title></problem>`)
+
+	server, _ := echoServer(t, http.StatusUnprocessableEntity, "application/problem+xml", respBody)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[any](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	decoded, err := resp.As[problem]()
+	require.NoError(t, err)
+	assert.Equal(t, "Unprocessable", decoded.Title)
+}
+
 // --- HTTPClient ---
 
 func TestNewHTTPClient_DefaultPool(t *testing.T) {

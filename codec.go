@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"mime"
+	"strings"
 )
 
 // Codec (de)serializes a single media type. Request bodies are encoded with the
@@ -27,7 +28,7 @@ func (xmlCodec) ContentType() string                { return "application/xml" }
 func (xmlCodec) Marshal(v any) ([]byte, error)      { return xml.Marshal(v) }
 func (xmlCodec) Unmarshal(data []byte, v any) error { return xml.Unmarshal(data, v) }
 
-// by defaultCodec is used when a response omits Content-Type or advertises an
+// defaultCodec is used when a response omits Content-Type or advertises an
 // unrecognized media type. JSON keeps backward compatibility with the original
 // hardcoded behavior.
 var defaultCodec Codec = jsonCodec{}
@@ -51,6 +52,14 @@ func codecForContentType(header string) Codec {
 	}
 	if c, ok := codecRegistry[mediaType]; ok {
 		return c
+	}
+	// Structured syntax suffixes (RFC 6839): application/problem+json,
+	// application/vnd.api+json, application/problem+xml, etc.
+	switch {
+	case strings.HasSuffix(mediaType, "+json"):
+		return jsonCodec{}
+	case strings.HasSuffix(mediaType, "+xml"):
+		return xmlCodec{}
 	}
 	return defaultCodec
 }
