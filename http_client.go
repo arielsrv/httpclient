@@ -1,8 +1,8 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,24 +55,72 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 }
 
 func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http.Header) (HTTPResponse[T], error) {
-	return r.doRequest[T](ctx, http.MethodGet, url, headers...)
+	return r.doRequest[T](ctx, http.MethodGet, url, Body{}, headers...)
+}
+
+// Post sends body (built with JSON/XML/Form) and decodes the response into T.
+func (r *HTTPClient) Post[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+	return r.doRequest[T](ctx, http.MethodPost, url, body, headers...)
+}
+
+// Put sends body (built with JSON/XML/Form) and decodes the response into T.
+func (r *HTTPClient) Put[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+	return r.doRequest[T](ctx, http.MethodPut, url, body, headers...)
+}
+
+// Patch sends body (built with JSON/XML/Form) and decodes the response into T.
+func (r *HTTPClient) Patch[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+	return r.doRequest[T](ctx, http.MethodPatch, url, body, headers...)
+}
+
+// Delete sends a DELETE request (no body) and decodes the response into T.
+func (r *HTTPClient) Delete[T any](ctx context.Context, url string, headers ...http.Header) (HTTPResponse[T], error) {
+	return r.doRequest[T](ctx, http.MethodDelete, url, Body{}, headers...)
 }
 
 // GetAsync fires a GET request in a goroutine and returns a Future immediately.
 // The context controls cancellation — cancelling ctx will unblock Await with an error.
 func (r *HTTPClient) GetAsync[T any](ctx context.Context, url string, headers ...http.Header) *Future[T] {
-	ch := make(chan futureResult[T], 1)
-	go func() {
-		resp, err := r.Get[T](ctx, url, headers...)
-		ch <- futureResult[T]{response: resp, err: err}
-	}()
-	return &Future[T]{ch: ch}
+	return async(func() (HTTPResponse[T], error) { return r.Get[T](ctx, url, headers...) })
 }
 
-func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url string, headers ...http.Header) (result HTTPResponse[T], err error) {
-	request, err := http.NewRequestWithContext(ctx, method, url, nil)
+// PostAsync fires a POST request in a goroutine and returns a Future immediately.
+func (r *HTTPClient) PostAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Post[T](ctx, url, body, headers...) })
+}
+
+// PutAsync fires a PUT request in a goroutine and returns a Future immediately.
+func (r *HTTPClient) PutAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Put[T](ctx, url, body, headers...) })
+}
+
+// PatchAsync fires a PATCH request in a goroutine and returns a Future immediately.
+func (r *HTTPClient) PatchAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Patch[T](ctx, url, body, headers...) })
+}
+
+// DeleteAsync fires a DELETE request in a goroutine and returns a Future immediately.
+func (r *HTTPClient) DeleteAsync[T any](ctx context.Context, url string, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Delete[T](ctx, url, headers...) })
+}
+
+func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url string, body Body, headers ...http.Header) (result HTTPResponse[T], err error) {
+	if body.err != nil {
+		return result, fmt.Errorf("encoding request body: %w", body.err)
+	}
+
+	var reader io.Reader
+	if body.data != nil {
+		reader = bytes.NewReader(body.data)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return result, fmt.Errorf("creating request: %w", err)
+	}
+
+	if body.contentType != "" {
+		request.Header.Set("Content-Type", body.contentType)
 	}
 
 	for _, h := range headers {
@@ -98,14 +146,17 @@ func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url st
 		return result, fmt.Errorf("reading response body: %w", err)
 	}
 
+	codec := codecForContentType(response.Header.Get("Content-Type"))
+
 	result = HTTPResponse[T]{
 		statusCode: response.StatusCode,
 		body:       bodyBytes,
 		headers:    response.Header,
+		codec:      codec,
 	}
 
 	if result.IsSuccess() && len(bodyBytes) > 0 {
-		if err = json.Unmarshal(bodyBytes, &result.data); err != nil {
+		if err = codec.Unmarshal(bodyBytes, &result.data); err != nil {
 			return result, fmt.Errorf("deserializing response: %w", err)
 		}
 	}

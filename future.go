@@ -16,3 +16,13 @@ func (r *Future[T]) Await() (HTTPResponse[T], error) {
 	response := <-r.ch
 	return response.response, response.err
 }
+
+// async runs fn in a goroutine and returns a Future that resolves with its result.
+func async[T any](fn func() (HTTPResponse[T], error)) *Future[T] {
+	ch := make(chan futureResult[T], 1)
+	go func() {
+		resp, err := fn()
+		ch <- futureResult[T]{response: resp, err: err}
+	}()
+	return &Future[T]{ch: ch}
+}

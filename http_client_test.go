@@ -3,11 +3,13 @@ package httpclient_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"httpclient"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +21,44 @@ import (
 type testUser struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+type xmlUser struct {
+	XMLName xml.Name `xml:"user"`
+	ID      int      `xml:"id"`
+	Name    string   `xml:"name"`
+}
+
+// capturedRequest records what the server received, for asserting on the wire.
+type capturedRequest struct {
+	method      string
+	contentType string
+	body        []byte
+	form        url.Values
+}
+
+// echoServer captures the incoming request and replies with the given status,
+// optionally writing rawBody with contentType.
+func echoServer(t *testing.T, status int, contentType string, rawBody []byte) (*httptest.Server, *capturedRequest) {
+	t.Helper()
+	captured := &capturedRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured.method = r.Method
+		captured.contentType = r.Header.Get("Content-Type")
+		captured.body, _ = io.ReadAll(r.Body)
+		if r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+			// Body is already drained by ReadAll, so parse the captured bytes.
+			captured.form, _ = url.ParseQuery(string(captured.body))
+		}
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.WriteHeader(status)
+		if rawBody != nil {
+			_, _ = w.Write(rawBody)
+		}
+	}))
+	return server, captured
 }
 
 // roundTripFunc allows using a plain function as an http.RoundTripper.
@@ -181,6 +221,182 @@ func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
 	_, err = resp.As[testUser]()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deserializing body")
+}
+
+// --- Request bodies / verbs ---
+
+func TestPost_JSONBody(t *testing.T) {
+	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Alice"}`))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Post[testUser](
+		context.Background(), server.URL, httpclient.JSON(testUser{ID: 1, Name: "Alice"}))
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPost, captured.method)
+	assert.Equal(t, "application/json", captured.contentType)
+	assert.JSONEq(t, `{"id":1,"name":"Alice"}`, string(captured.body))
+
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, "Alice", resp.Data().Name)
+}
+
+func TestPost_XMLBody_And_XMLResponse(t *testing.T) {
+	respBody, err := xml.Marshal(xmlUser{ID: 7, Name: "Bob"})
+	require.NoError(t, err)
+
+	server, captured := echoServer(t, http.StatusOK, "application/xml", respBody)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Post[xmlUser](
+		context.Background(), server.URL, httpclient.XML(xmlUser{ID: 7, Name: "Bob"}))
+	require.NoError(t, err)
+
+	assert.Equal(t, "application/xml", captured.contentType)
+	assert.Contains(t, string(captured.body), "<name>Bob</name>")
+
+	// Response decoded via content-negotiated XML codec.
+	assert.Equal(t, 7, resp.Data().ID)
+	assert.Equal(t, "Bob", resp.Data().Name)
+}
+
+func TestPost_FormBody(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	values := url.Values{"name": {"Carol"}, "age": {"30"}}
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, httpclient.Form(values))
+	require.NoError(t, err)
+
+	assert.Equal(t, "application/x-www-form-urlencoded", captured.contentType)
+	assert.Equal(t, "Carol", captured.form.Get("name"))
+	assert.Equal(t, "30", captured.form.Get("age"))
+}
+
+func TestPost_EncodeError(t *testing.T) {
+	// A channel cannot be marshaled to JSON — the error must surface on send.
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), "http://example.com", httpclient.JSON(make(chan int)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encoding request body")
+}
+
+func TestPut_SendsBodyAndMethod(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "application/json", []byte(`{"id":2,"name":"Dave"}`))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Put[testUser](
+		context.Background(), server.URL, httpclient.JSON(testUser{ID: 2, Name: "Dave"}))
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPut, captured.method)
+	assert.Equal(t, "Dave", resp.Data().Name)
+}
+
+func TestPatch_SendsBodyAndMethod(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	_, err := httpclient.NewHTTPClient().Patch[any](
+		context.Background(), server.URL, httpclient.JSON(map[string]string{"name": "Eve"}))
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPatch, captured.method)
+	assert.JSONEq(t, `{"name":"Eve"}`, string(captured.body))
+}
+
+func TestDelete_NoBody(t *testing.T) {
+	server, captured := echoServer(t, http.StatusNoContent, "", nil)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Delete[any](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodDelete, captured.method)
+	assert.Empty(t, captured.body)
+	assert.True(t, resp.IsSuccess())
+}
+
+func TestPostAsync_Await(t *testing.T) {
+	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":5,"name":"Grace"}`))
+	defer server.Close()
+
+	future := httpclient.NewHTTPClient().PostAsync[testUser](
+		context.Background(), server.URL, httpclient.JSON(testUser{ID: 5, Name: "Grace"}))
+
+	resp, err := future.Await()
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodPost, captured.method)
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, "Grace", resp.Data().Name)
+}
+
+func TestVerbAsync_MethodsReachServer(t *testing.T) {
+	client := httpclient.NewHTTPClient()
+	ctx := context.Background()
+
+	cases := []struct {
+		name   string
+		fire   func(url string) *httpclient.Future[any]
+		method string
+	}{
+		{"Put", func(u string) *httpclient.Future[any] {
+			return client.PutAsync[any](ctx, u, httpclient.JSON(map[string]int{"n": 1}))
+		}, http.MethodPut},
+		{"Patch", func(u string) *httpclient.Future[any] {
+			return client.PatchAsync[any](ctx, u, httpclient.JSON(map[string]int{"n": 1}))
+		}, http.MethodPatch},
+		{"Delete", func(u string) *httpclient.Future[any] {
+			return client.DeleteAsync[any](ctx, u)
+		}, http.MethodDelete},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, captured := echoServer(t, http.StatusOK, "", nil)
+			defer server.Close()
+
+			_, err := tc.fire(server.URL).Await()
+			require.NoError(t, err)
+			assert.Equal(t, tc.method, captured.method)
+		})
+	}
+}
+
+// --- Response content negotiation ---
+
+func TestResponse_XMLNegotiationWithCharset(t *testing.T) {
+	respBody, err := xml.Marshal(xmlUser{ID: 9, Name: "Frank"})
+	require.NoError(t, err)
+
+	// Content-Type carries a charset parameter — must still negotiate XML.
+	server, _ := echoServer(t, http.StatusOK, "application/xml; charset=utf-8", respBody)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Frank", resp.Data().Name)
+}
+
+func TestResponse_As_UsesNegotiatedXMLCodec(t *testing.T) {
+	type apiError struct {
+		XMLName xml.Name `xml:"error"`
+		Message string   `xml:"message"`
+	}
+	respBody := []byte(`<error><message>not found</message></error>`)
+
+	server, _ := echoServer(t, http.StatusNotFound, "application/xml", respBody)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	require.False(t, resp.IsSuccess())
+
+	// As must reuse the XML codec negotiated for the response, not JSON.
+	decoded, err := resp.As[apiError]()
+	require.NoError(t, err)
+	assert.Equal(t, "not found", decoded.Message)
 }
 
 // --- HTTPClient ---
