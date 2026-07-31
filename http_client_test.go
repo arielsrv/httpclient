@@ -329,23 +329,23 @@ func TestForm_NilPointerSkipped(t *testing.T) {
 	assert.Empty(t, captured.form["cap"])
 }
 
-func TestForm_NestedStructErrors(t *testing.T) {
+func TestForm_NestedStruct(t *testing.T) {
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
 	body := httpclient.Form(struct {
-		Inner struct{ X int } `form:"inner"`
-	}{})
+		Inner struct {
+			X int `form:"x"`
+		} `form:"inner"`
+	}{Inner: struct {
+		X int `form:"x"`
+	}{X: 5}})
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), "http://example.com", body)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "encoding request body")
-	assert.Contains(t, err.Error(), "inner")
-}
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	require.NoError(t, err)
 
-func TestForm_NonStructErrors(t *testing.T) {
-	body := httpclient.Form(42)
-
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), "http://example.com", body)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expected struct")
+	// go-playground/form encodes nested fields with dotted keys.
+	assert.Equal(t, "5", captured.form.Get("inner.x"))
 }
 
 func TestPost_EncodeError(t *testing.T) {

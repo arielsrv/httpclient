@@ -34,7 +34,7 @@ func main() {
 
 	// One client, three content types, one struct — the format travels with each
 	// request and the tags drive encoding. Fire all three concurrently with the
-	// async verbs; total ≈ slowest request.
+	// async verbs; total ≈ the slowest request.
 	jsonFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.JSON(order))
 	xmlFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.XML(order))
 	formFuture := client.PostAsync[httpbinResponse](ctx, endpoint, httpclient.Form(order))
@@ -47,8 +47,10 @@ func main() {
 	fmt.Printf("XML   → Content-Type: %s | raw body: %s\n",
 		xmlResp.Data().Headers["Content-Type"], xmlResp.Data().Data)
 
+	// httpbin echoes JSON and form bodies parsed (under "json"/"form") and leaves
+	// "data" empty; only bodies it doesn't parse (like XML above) come back raw.
 	formResp := await(formFuture, "Form")
-	fmt.Printf("Form  → Content-Type: %s | server parsed: %v\n",
+	fmt.Printf("Form  → Content-Type: %s | server parsed: %v (raw echoed under \"form\", not \"data\")\n",
 		formResp.Data().Headers["Content-Type"], formResp.Data().Form)
 }
 
