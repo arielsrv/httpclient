@@ -141,10 +141,63 @@ func TestHTTPResponse_Headers(t *testing.T) {
 	assert.Equal(t, "hello", resp.Headers().Get("X-Custom-Header"))
 }
 
+func TestHTTPResponse_As_TypedErrorBody(t *testing.T) {
+	server := newTestServer(http.StatusBadRequest, map[string]string{"error": "bad input"}, nil)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	require.False(t, resp.IsSuccess())
+
+	apiErr, err := resp.As[struct {
+		Error string `json:"error"`
+	}]()
+	require.NoError(t, err)
+	assert.Equal(t, "bad input", apiErr.Error)
+}
+
+func TestHTTPResponse_As_EmptyBody(t *testing.T) {
+	server := newTestServer(http.StatusNoContent, nil, nil)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[any](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	out, err := resp.As[testUser]()
+	require.NoError(t, err)
+	assert.Zero(t, out.ID)
+}
+
+func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("not-json"))
+	}))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[any](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	_, err = resp.As[testUser]()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deserializing body")
+}
+
 // --- HTTPClient ---
 
 func TestNewHTTPClient_DefaultPool(t *testing.T) {
 	assert.NotNil(t, httpclient.NewHTTPClient())
+}
+
+func TestWithTimeout_TripsBeforeSlowResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	client := httpclient.NewHTTPClient(httpclient.WithTimeout(10 * time.Millisecond))
+	_, err := client.Get[any](context.Background(), server.URL)
+	assert.Error(t, err)
 }
 
 func TestNewHTTPClient_WithCustomPool(t *testing.T) {

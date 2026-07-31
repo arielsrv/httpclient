@@ -7,7 +7,12 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"time"
 )
+
+// DefaultTimeout bounds the whole request (dial + body read) unless overridden.
+// Use WithTimeout(0) to disable it and rely solely on the context deadline.
+const DefaultTimeout = 30 * time.Second
 
 type HTTPClient struct {
 	lowLevelClient http.Client
@@ -28,10 +33,19 @@ func WithTransport(rt http.RoundTripper) ClientOption {
 	}
 }
 
+// WithTimeout bounds the whole request (dial + body read). Overrides DefaultTimeout.
+// Pass 0 to disable the client-level timeout and rely only on the context deadline.
+func WithTimeout(d time.Duration) ClientOption {
+	return func(c *HTTPClient) {
+		c.lowLevelClient.Timeout = d
+	}
+}
+
 func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	httpClient := &HTTPClient{
 		lowLevelClient: http.Client{
 			Transport: NewConnectionPool().transport,
+			Timeout:   DefaultTimeout,
 		},
 	}
 	for opt := range slices.Values(opts) {
