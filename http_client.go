@@ -185,13 +185,20 @@ func (r *HTTPClient) doRequest[T any](
 	}
 
 	if result.IsSuccess() && len(bodyBytes) > 0 {
-		// When T is []byte the caller wants the raw bytes — skip codec unmarshaling.
-		if ptr, ok := any(&result.data).(*[]byte); ok {
-			*ptr = bodyBytes
-		} else if unmarshalErr := codec.Unmarshal(bodyBytes, &result.data); unmarshalErr != nil {
+		if unmarshalErr := unmarshalBody(bodyBytes, codec, &result.data); unmarshalErr != nil {
 			return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
 		}
 	}
 
 	return result, nil
+}
+
+// unmarshalBody decodes data into dst using codec, except when dst is a *[]byte —
+// in that case the raw bytes are assigned directly without any codec involved.
+func unmarshalBody[T any](data []byte, codec Codec, dst *T) error {
+	if ptr, ok := any(dst).(*[]byte); ok {
+		*ptr = data
+		return nil
+	}
+	return codec.Unmarshal(data, dst)
 }

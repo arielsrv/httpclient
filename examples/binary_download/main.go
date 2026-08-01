@@ -28,7 +28,7 @@ func main() {
 	fmt.Printf("downloaded %d bytes (Content-Type: %s)\n",
 		len(data), resp.Headers().Get("Content-Type"))
 
-	if err := os.WriteFile("favicon.ico", data, 0o600); err != nil {
+	if err = os.WriteFile("favicon.ico", data, 0o600); err != nil {
 		log.Fatalf("writing file: %v", err)
 	}
 	fmt.Println("saved to favicon.ico")
