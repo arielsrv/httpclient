@@ -175,6 +175,9 @@ func (r *HTTPClient) doRequest[T any](
 	if doErr != nil {
 		return HTTPResponse[T]{}, fmt.Errorf("network error: %w", doErr)
 	}
+	if response == nil {
+		return HTTPResponse[T]{}, fmt.Errorf("network error: nil response")
+	}
 
 	bodyBytes, readErr := io.ReadAll(response.Body)
 	closeErr := response.Body.Close()
