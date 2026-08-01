@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"httpclient"
 	"log"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/arielsrv/httpclient"
 )
 
 // CreateUser is the success payload the caller expects on 2xx.

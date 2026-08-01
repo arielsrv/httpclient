@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"httpclient"
 	"log"
+
+	"github.com/arielsrv/httpclient"
 )
 
 type User struct {

@@ -13,9 +13,9 @@ import (
 // when the request is sent. Retaining the encoded bytes also makes the body
 // safe to reuse (e.g. on a future retry) without re-serializing.
 type Body struct {
+	err         error
 	contentType string
 	data        []byte
-	err         error
 }
 
 // formEncoder is safe for concurrent use and caches struct metadata across calls.

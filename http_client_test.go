@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"httpclient"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,27 +13,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arielsrv/httpclient"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type testUser struct {
-	ID   int    `json:"id"`
 	Name string `json:"name"`
+	ID   int    `json:"id"`
 }
 
 type xmlUser struct {
 	XMLName xml.Name `xml:"user"`
-	ID      int      `xml:"id"`
 	Name    string   `xml:"name"`
+	ID      int      `xml:"id"`
 }
 
 // capturedRequest records what the server received, for asserting on the wire.
 type capturedRequest struct {
+	form        url.Values
 	method      string
 	contentType string
 	body        []byte
-	form        url.Values
 }
 
 // echoServer captures the incoming request and replies with the given status,
@@ -61,7 +62,7 @@ func echoServer(t *testing.T, status int, contentType string, rawBody []byte) (*
 	return server, captured
 }
 
-// roundTripFunc allows using a plain function as an http.RoundTripper.
+// roundTripFunc allows using a plain function as an [http.RoundTripper].
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
@@ -108,6 +109,7 @@ func newTestServer(status int, body any, headers map[string]string) *httptest.Se
 // --- HTTPResponse ---
 
 func TestHTTPResponse_IsSuccess(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		statusCode int
 		want       bool
@@ -122,6 +124,7 @@ func TestHTTPResponse_IsSuccess(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(http.StatusText(tc.statusCode), func(t *testing.T) {
+			t.Parallel()
 			server := newTestServer(tc.statusCode, nil, nil)
 			defer server.Close()
 
@@ -133,6 +136,7 @@ func TestHTTPResponse_IsSuccess(t *testing.T) {
 }
 
 func TestHTTPResponse_StatusCode(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusTeapot, nil, nil)
 	defer server.Close()
 
@@ -142,6 +146,7 @@ func TestHTTPResponse_StatusCode(t *testing.T) {
 }
 
 func TestHTTPResponse_DataDeserialized(t *testing.T) {
+	t.Parallel()
 	user := testUser{ID: 1, Name: "Alice"}
 	server := newTestServer(http.StatusOK, user, nil)
 	defer server.Close()
@@ -153,6 +158,7 @@ func TestHTTPResponse_DataDeserialized(t *testing.T) {
 }
 
 func TestHTTPResponse_DataNotDeserializedOnNonSuccess(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusBadRequest, map[string]string{"error": "bad input"}, nil)
 	defer server.Close()
 
@@ -164,6 +170,7 @@ func TestHTTPResponse_DataNotDeserializedOnNonSuccess(t *testing.T) {
 }
 
 func TestHTTPResponse_BodyOnNonSuccess(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusUnauthorized, map[string]string{"message": "unauthorized"}, nil)
 	defer server.Close()
 
@@ -173,6 +180,7 @@ func TestHTTPResponse_BodyOnNonSuccess(t *testing.T) {
 }
 
 func TestHTTPResponse_Headers(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusOK, nil, map[string]string{"X-Custom-Header": "hello"})
 	defer server.Close()
 
@@ -182,6 +190,7 @@ func TestHTTPResponse_Headers(t *testing.T) {
 }
 
 func TestHTTPResponse_As_TypedErrorBody(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusBadRequest, map[string]string{"error": "bad input"}, nil)
 	defer server.Close()
 
@@ -197,6 +206,7 @@ func TestHTTPResponse_As_TypedErrorBody(t *testing.T) {
 }
 
 func TestHTTPResponse_As_EmptyBody(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusNoContent, nil, nil)
 	defer server.Close()
 
@@ -209,6 +219,7 @@ func TestHTTPResponse_As_EmptyBody(t *testing.T) {
 }
 
 func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte("not-json"))
@@ -226,6 +237,7 @@ func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
 // --- Request bodies / verbs ---
 
 func TestPost_JSONBody(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Alice"}`))
 	defer server.Close()
 
@@ -242,6 +254,7 @@ func TestPost_JSONBody(t *testing.T) {
 }
 
 func TestPost_XMLBody_And_XMLResponse(t *testing.T) {
+	t.Parallel()
 	respBody, err := xml.Marshal(xmlUser{ID: 7, Name: "Bob"})
 	require.NoError(t, err)
 
@@ -261,6 +274,7 @@ func TestPost_XMLBody_And_XMLResponse(t *testing.T) {
 }
 
 func TestForm_StructWithTags(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -278,6 +292,7 @@ func TestForm_StructWithTags(t *testing.T) {
 }
 
 func TestForm_OmitemptyDashAndFieldName(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -299,6 +314,7 @@ func TestForm_OmitemptyDashAndFieldName(t *testing.T) {
 }
 
 func TestForm_SliceRepeatsKey(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -313,6 +329,7 @@ func TestForm_SliceRepeatsKey(t *testing.T) {
 }
 
 func TestForm_NilPointerSkipped(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -330,6 +347,7 @@ func TestForm_NilPointerSkipped(t *testing.T) {
 }
 
 func TestForm_NestedStruct(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -349,6 +367,7 @@ func TestForm_NestedStruct(t *testing.T) {
 }
 
 func TestPost_EncodeError(t *testing.T) {
+	t.Parallel()
 	// A channel cannot be marshaled to JSON — the error must surface on send.
 	_, err := httpclient.NewHTTPClient().Post[any](
 		context.Background(), "http://example.com", httpclient.JSON(make(chan int)))
@@ -357,6 +376,7 @@ func TestPost_EncodeError(t *testing.T) {
 }
 
 func TestPut_SendsBodyAndMethod(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "application/json", []byte(`{"id":2,"name":"Dave"}`))
 	defer server.Close()
 
@@ -369,6 +389,7 @@ func TestPut_SendsBodyAndMethod(t *testing.T) {
 }
 
 func TestPatch_SendsBodyAndMethod(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
@@ -381,6 +402,7 @@ func TestPatch_SendsBodyAndMethod(t *testing.T) {
 }
 
 func TestDelete_NoBody(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusNoContent, "", nil)
 	defer server.Close()
 
@@ -393,6 +415,7 @@ func TestDelete_NoBody(t *testing.T) {
 }
 
 func TestPostAsync_Await(t *testing.T) {
+	t.Parallel()
 	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":5,"name":"Grace"}`))
 	defer server.Close()
 
@@ -407,6 +430,7 @@ func TestPostAsync_Await(t *testing.T) {
 }
 
 func TestVerbAsync_MethodsReachServer(t *testing.T) {
+	t.Parallel()
 	client := httpclient.NewHTTPClient()
 	ctx := context.Background()
 
@@ -428,6 +452,7 @@ func TestVerbAsync_MethodsReachServer(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			server, captured := echoServer(t, http.StatusOK, "", nil)
 			defer server.Close()
 
@@ -441,6 +466,7 @@ func TestVerbAsync_MethodsReachServer(t *testing.T) {
 // --- Response content negotiation ---
 
 func TestResponse_XMLNegotiationWithCharset(t *testing.T) {
+	t.Parallel()
 	respBody, err := xml.Marshal(xmlUser{ID: 9, Name: "Frank"})
 	require.NoError(t, err)
 
@@ -454,6 +480,7 @@ func TestResponse_XMLNegotiationWithCharset(t *testing.T) {
 }
 
 func TestResponse_As_UsesNegotiatedXMLCodec(t *testing.T) {
+	t.Parallel()
 	type apiError struct {
 		XMLName xml.Name `xml:"error"`
 		Message string   `xml:"message"`
@@ -474,6 +501,7 @@ func TestResponse_As_UsesNegotiatedXMLCodec(t *testing.T) {
 }
 
 func TestResponse_ProblemJSONNegotiatedBySuffix(t *testing.T) {
+	t.Parallel()
 	// RFC 7807 problem+json — the "+json" suffix must route to the JSON codec.
 	type problem struct {
 		Title  string `json:"title"`
@@ -495,6 +523,7 @@ func TestResponse_ProblemJSONNegotiatedBySuffix(t *testing.T) {
 }
 
 func TestResponse_ProblemXMLNegotiatedBySuffix(t *testing.T) {
+	t.Parallel()
 	// The "+xml" suffix must route to the XML codec — before suffix support this
 	// fell back to JSON and failed to decode.
 	type problem struct {
@@ -517,10 +546,12 @@ func TestResponse_ProblemXMLNegotiatedBySuffix(t *testing.T) {
 // --- HTTPClient ---
 
 func TestNewHTTPClient_DefaultPool(t *testing.T) {
+	t.Parallel()
 	assert.NotNil(t, httpclient.NewHTTPClient())
 }
 
 func TestWithTimeout_TripsBeforeSlowResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
@@ -532,6 +563,7 @@ func TestWithTimeout_TripsBeforeSlowResponse(t *testing.T) {
 }
 
 func TestNewHTTPClient_WithCustomPool(t *testing.T) {
+	t.Parallel()
 	pool := httpclient.NewConnectionPoolWithOptions(httpclient.ConnectionPoolOptions{
 		MaxIdleConns:        5,
 		MaxIdleConnsPerHost: 2,
@@ -542,11 +574,13 @@ func TestNewHTTPClient_WithCustomPool(t *testing.T) {
 }
 
 func TestHTTPClient_Get_NetworkError(t *testing.T) {
+	t.Parallel()
 	_, err := httpclient.NewHTTPClient().Get[any](context.Background(), "http://localhost:0/invalid")
 	assert.Error(t, err)
 }
 
 func TestHTTPClient_Get_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Second)
 	}))
@@ -562,10 +596,12 @@ func TestHTTPClient_Get_ContextCancellation(t *testing.T) {
 // --- ConnectionPool ---
 
 func TestNewConnectionPool_Defaults(t *testing.T) {
+	t.Parallel()
 	assert.NotNil(t, httpclient.NewConnectionPool())
 }
 
 func TestNewConnectionPoolWithOptions(t *testing.T) {
+	t.Parallel()
 	pool := httpclient.NewConnectionPoolWithOptions(httpclient.ConnectionPoolOptions{
 		MaxIdleConns:        50,
 		MaxIdleConnsPerHost: 5,
@@ -578,6 +614,7 @@ func TestNewConnectionPoolWithOptions(t *testing.T) {
 // --- Future ---
 
 func TestGetAsync_Await(t *testing.T) {
+	t.Parallel()
 	user := testUser{ID: 42, Name: "Bob"}
 	server := newTestServer(http.StatusOK, user, nil)
 	defer server.Close()
@@ -590,6 +627,7 @@ func TestGetAsync_Await(t *testing.T) {
 }
 
 func TestGetAsync_ConcurrentRequests(t *testing.T) {
+	t.Parallel()
 	usersServer := newTestServer(http.StatusOK, []testUser{{ID: 1, Name: "Alice"}}, nil)
 	postsServer := newTestServer(http.StatusOK, []testUser{{ID: 2, Name: "Post"}}, nil)
 	defer usersServer.Close()
@@ -614,6 +652,7 @@ func TestGetAsync_ConcurrentRequests(t *testing.T) {
 }
 
 func TestGetAsync_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Second)
 	}))
@@ -631,6 +670,7 @@ func TestGetAsync_ContextCancellation(t *testing.T) {
 // TestRace_SharedClientConcurrentGets verifies that a single client can be used
 // from multiple goroutines simultaneously without data races.
 func TestRace_SharedClientConcurrentGets(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusOK, testUser{ID: 1, Name: "Alice"}, nil)
 	defer server.Close()
 
@@ -655,6 +695,7 @@ func TestRace_SharedClientConcurrentGets(t *testing.T) {
 // TestRace_SharedPoolMultipleClients verifies that multiple clients sharing a
 // connection pool don't race on the underlying transport.
 func TestRace_SharedPoolMultipleClients(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusOK, testUser{ID: 2, Name: "Bob"}, nil)
 	defer server.Close()
 
@@ -684,6 +725,7 @@ func TestRace_SharedPoolMultipleClients(t *testing.T) {
 // TestRace_ConcurrentFutures verifies that firing many GetAsync calls at once
 // and awaiting them all doesn't cause races.
 func TestRace_ConcurrentFutures(t *testing.T) {
+	t.Parallel()
 	server := newTestServer(http.StatusOK, testUser{ID: 3, Name: "Carol"}, nil)
 	defer server.Close()
 
@@ -704,6 +746,7 @@ func TestRace_ConcurrentFutures(t *testing.T) {
 }
 
 func TestHTTPClient_Get_WithHeaders(t *testing.T) {
+	t.Parallel()
 	var received http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received = r.Header
@@ -722,15 +765,17 @@ func TestHTTPClient_Get_WithHeaders(t *testing.T) {
 }
 
 // TestHTTPClient_Get_InvalidURL covers the NewRequestWithContext error branch
-// (null byte makes url.Parse reject the URL).
+// (null byte makes [url.Parse] reject the URL).
 func TestHTTPClient_Get_InvalidURL(t *testing.T) {
+	t.Parallel()
 	_, err := httpclient.NewHTTPClient().Get[any](context.Background(), "http://foo\x00.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "creating request")
 }
 
-// TestHTTPClient_Get_BodyReadError covers the io.ReadAll error branch.
+// TestHTTPClient_Get_BodyReadError covers the [io.ReadAll] error branch.
 func TestHTTPClient_Get_BodyReadError(t *testing.T) {
+	t.Parallel()
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -748,6 +793,7 @@ func TestHTTPClient_Get_BodyReadError(t *testing.T) {
 // TestHTTPClient_Get_BodyCloseError covers the Body.Close() error branch.
 // With named returns the deferred close error propagates to the caller.
 func TestHTTPClient_Get_BodyCloseError(t *testing.T) {
+	t.Parallel()
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -762,8 +808,9 @@ func TestHTTPClient_Get_BodyCloseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "closing response body")
 }
 
-// TestHTTPClient_Get_InvalidJSONResponse covers the json.Unmarshal error branch.
+// TestHTTPClient_Get_InvalidJSONResponse covers the [json.Unmarshal] error branch.
 func TestHTTPClient_Get_InvalidJSONResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("not-valid-json"))

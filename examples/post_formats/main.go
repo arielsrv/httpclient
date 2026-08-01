@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"httpclient"
 	"log"
+
+	"github.com/arielsrv/httpclient"
 )
 
 // Order is sent as JSON, XML, and form — the struct tags drive each encoding.

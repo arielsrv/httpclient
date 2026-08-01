@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: '3'
+
+env:
+  CGO_ENABLED: 0
+
+tasks:
+  lint-tools:
+    cmds:
+      - go tool golangci-lint run --fix
+      - go tool gofumpt -w -l .
+      - go tool betteralign -test_files -generated_files -apply ./...
+
+  lint:
+    cmds:
+      - cd examples
+      -   task: lint-tools
+      - cd ..
+      -   task: lint-tools
+  test:race:
+    cmds:
+      - go test -race -count 5 ./... -v
+  test:mock:
+    cmds:
+      - go tool mockery --config .mockery.yml
+  test:
+    cmds:
+      -   task: test:mock
+      - go test -v ./...
+      -   task: test:race
+  download:
+    cmds:
+      - go work sync
+      - (cd examples || exit ; go mod tidy)
+      - (cd examples || exit ; go build ./...)
+      - go mod tidy
+  upgrade:
+    cmds:
+      - go mod tidy
+      - (cd examples || exit ; go mod tidy)
+      - go tool go-mod-upgrade
+  default:
+    cmds:
+      -   task: download
+      -   task: lint
+      -   task: test

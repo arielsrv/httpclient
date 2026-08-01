@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"httpclient"
 	"log"
 	"net/http"
 	"slices"
+
+	"github.com/arielsrv/httpclient"
 )
 
 type UserResponse struct {

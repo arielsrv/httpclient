@@ -1,0 +1,13 @@
+# This is the configuration file for mockery, a tool for generating Go mocks.
+all: true
+dir: "{{.InterfaceDirRelative}}"
+log-level: Warn
+filename: "mock_{{.InterfaceName}}.go"
+template: testify
+template-data:
+  unroll-variadic: True
+force-file-write: True
+packages:
+  httpclient:
+    config:
+      recursive: true

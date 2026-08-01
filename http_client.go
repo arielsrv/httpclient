@@ -59,17 +59,32 @@ func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http
 }
 
 // Post sends body (built with JSON/XML/Form) and decodes the response into T.
-func (r *HTTPClient) Post[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+func (r *HTTPClient) Post[T any](
+	ctx context.Context,
+	url string,
+	body Body,
+	headers ...http.Header,
+) (HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPost, url, body, headers...)
 }
 
 // Put sends body (built with JSON/XML/Form) and decodes the response into T.
-func (r *HTTPClient) Put[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+func (r *HTTPClient) Put[T any](
+	ctx context.Context,
+	url string,
+	body Body,
+	headers ...http.Header,
+) (HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPut, url, body, headers...)
 }
 
 // Patch sends body (built with JSON/XML/Form) and decodes the response into T.
-func (r *HTTPClient) Patch[T any](ctx context.Context, url string, body Body, headers ...http.Header) (HTTPResponse[T], error) {
+func (r *HTTPClient) Patch[T any](
+	ctx context.Context,
+	url string,
+	body Body,
+	headers ...http.Header,
+) (HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPatch, url, body, headers...)
 }
 
@@ -104,7 +119,15 @@ func (r *HTTPClient) DeleteAsync[T any](ctx context.Context, url string, headers
 	return async(func() (HTTPResponse[T], error) { return r.Delete[T](ctx, url, headers...) })
 }
 
-func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url string, body Body, headers ...http.Header) (result HTTPResponse[T], err error) {
+func (r *HTTPClient) doRequest[T any](
+	ctx context.Context,
+	method string,
+	url string,
+	body Body,
+	headers ...http.Header,
+) (_ HTTPResponse[T], err error) {
+	var result HTTPResponse[T]
+
 	if body.err != nil {
 		return result, fmt.Errorf("encoding request body: %w", body.err)
 	}
