@@ -175,12 +175,13 @@ func (r *HTTPClient) doRequest[T any](
 		return HTTPResponse[T]{}, fmt.Errorf("closing response body: %w", closeErr)
 	}
 
-	// When T is []byte the caller wants raw bytes regardless of what Content-Type
-	// the server advertises — use byteCodec directly.
-	var zero T
-	codec := codecForContentType(response.Header.Get("Content-Type"))
-	if _, ok := any(zero).([]byte); ok {
-		codec = byteCodec{}
+	// Prefer the Accept header (caller intent) for codec selection — this lets
+	// AcceptBinary() force byteCodec even when the server responds with a
+	// content type not in the registry (image/x-icon, image/png, etc.).
+	// Fall back to the response Content-Type for standard negotiation.
+	codec := codecForAcceptHeader(headers)
+	if codec == nil {
+		codec = codecForContentType(response.Header.Get("Content-Type"))
 	}
 
 	result := HTTPResponse[T]{

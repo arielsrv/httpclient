@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"mime"
+	"net/http"
 	"strings"
 )
 
@@ -71,7 +72,19 @@ var codecRegistry = map[string]Codec{
 	mimeBinary: byteCodec{},
 }
 
-// codecForContentType negotiates a response codec from a Content-Type header,
+// codecForAcceptHeader returns the codec matching the Accept header from the
+// caller's request headers, or nil if no Accept header is present or recognized.
+// This lets callers like AcceptBinary() drive codec selection independently of
+// whatever Content-Type the server responds with.
+func codecForAcceptHeader(headers []http.Header) Codec {
+	for _, h := range headers {
+		if accept := h.Get(acceptHeader); accept != "" {
+			return codecForContentType(accept)
+		}
+	}
+	return nil
+}
+
 // tolerating parameters like "; charset=utf-8". Falls back to defaultCodec.
 func codecForContentType(header string) Codec {
 	if header == "" {
