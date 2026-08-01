@@ -18,7 +18,8 @@ import (
 func TestForm_EncodeError(t *testing.T) {
 	t.Parallel()
 	_, err := httpclient.NewHTTPClient().Post[any](
-		context.Background(), "http://example.com", httpclient.Form(nil))
+		context.Background(), "http://example.com", nil,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encoding request body")
 	assert.Contains(t, err.Error(), "form")

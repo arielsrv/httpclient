@@ -2,6 +2,8 @@ package httpclient
 
 import (
 	"fmt"
+	"mime"
+	"net/http"
 
 	"github.com/go-playground/form/v4"
 )
@@ -40,6 +42,34 @@ func Form(v any) Body {
 		contentType: "application/x-www-form-urlencoded",
 		data:        []byte(values.Encode()),
 	}
+}
+
+// bodyFromHeaders encodes v using the codec that matches the Content-Type header
+// found in headers. Falls back to JSON when no Content-Type is present.
+// application/x-www-form-urlencoded is handled via Form encoding.
+func bodyFromHeaders(v any, headers []http.Header) Body {
+	ct := contentTypeFromHeaders(headers)
+	if ct == "" {
+		return encodeBody(jsonCodec{}, v)
+	}
+
+	mediaType, _, _ := mime.ParseMediaType(ct)
+	if mediaType == "application/x-www-form-urlencoded" {
+		return Form(v)
+	}
+
+	return encodeBody(codecForContentType(ct), v)
+}
+
+// contentTypeFromHeaders returns the first Content-Type value found across all
+// provided header maps, or empty string if none is set.
+func contentTypeFromHeaders(headers []http.Header) string {
+	for _, h := range headers {
+		if ct := h.Get("Content-Type"); ct != "" {
+			return ct
+		}
+	}
+	return ""
 }
 
 func encodeBody(c Codec, v any) Body {

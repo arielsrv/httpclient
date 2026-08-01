@@ -58,34 +58,37 @@ func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http
 	return r.doRequest[T](ctx, http.MethodGet, url, Body{}, headers...)
 }
 
-// Post sends the body (built with JSON/XML/Form) and decodes the response into T.
+// Post encodes payload using the codec matching the Content-Type header (defaults
+// to application/json) and decodes the response into T.
 func (r *HTTPClient) Post[T any](
 	ctx context.Context,
 	url string,
-	body Body,
+	payload any,
 	headers ...http.Header,
 ) (HTTPResponse[T], error) {
-	return r.doRequest[T](ctx, http.MethodPost, url, body, headers...)
+	return r.doRequest[T](ctx, http.MethodPost, url, bodyFromHeaders(payload, headers), headers...)
 }
 
-// Put sends body (built with JSON/XML/Form) and decodes the response into T.
+// Put encodes payload using the codec matching the Content-Type header (defaults
+// to application/json) and decodes the response into T.
 func (r *HTTPClient) Put[T any](
 	ctx context.Context,
 	url string,
-	body Body,
+	payload any,
 	headers ...http.Header,
 ) (HTTPResponse[T], error) {
-	return r.doRequest[T](ctx, http.MethodPut, url, body, headers...)
+	return r.doRequest[T](ctx, http.MethodPut, url, bodyFromHeaders(payload, headers), headers...)
 }
 
-// Patch sends body (built with JSON/XML/Form) and decodes the response into T.
+// Patch encodes payload using the codec matching the Content-Type header (defaults
+// to application/json) and decodes the response into T.
 func (r *HTTPClient) Patch[T any](
 	ctx context.Context,
 	url string,
-	body Body,
+	payload any,
 	headers ...http.Header,
 ) (HTTPResponse[T], error) {
-	return r.doRequest[T](ctx, http.MethodPatch, url, body, headers...)
+	return r.doRequest[T](ctx, http.MethodPatch, url, bodyFromHeaders(payload, headers), headers...)
 }
 
 // Delete sends a DELETE request (no body) and decodes the response into T.
@@ -100,18 +103,23 @@ func (r *HTTPClient) GetAsync[T any](ctx context.Context, url string, headers ..
 }
 
 // PostAsync fires a POST request in a goroutine and returns a Future immediately.
-func (r *HTTPClient) PostAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Post[T](ctx, url, body, headers...) })
+func (r *HTTPClient) PostAsync[T any](ctx context.Context, url string, payload any, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Post[T](ctx, url, payload, headers...) })
 }
 
 // PutAsync fires a PUT request in a goroutine and returns a Future immediately.
-func (r *HTTPClient) PutAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Put[T](ctx, url, body, headers...) })
+func (r *HTTPClient) PutAsync[T any](ctx context.Context, url string, payload any, headers ...http.Header) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Put[T](ctx, url, payload, headers...) })
 }
 
 // PatchAsync fires a PATCH request in a goroutine and returns a Future immediately.
-func (r *HTTPClient) PatchAsync[T any](ctx context.Context, url string, body Body, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Patch[T](ctx, url, body, headers...) })
+func (r *HTTPClient) PatchAsync[T any](
+	ctx context.Context,
+	url string,
+	payload any,
+	headers ...http.Header,
+) *Future[T] {
+	return async(func() (HTTPResponse[T], error) { return r.Patch[T](ctx, url, payload, headers...) })
 }
 
 // DeleteAsync fires a DELETE request in a goroutine and returns a Future immediately.
@@ -140,16 +148,16 @@ func (r *HTTPClient) doRequest[T any](
 		return HTTPResponse[T]{}, fmt.Errorf("creating request: %w", err)
 	}
 
-	if body.contentType != "" {
-		request.Header.Set("Content-Type", body.contentType)
-	}
-
 	for _, h := range headers {
 		for key, values := range h {
 			for _, value := range values {
 				request.Header.Add(key, value)
 			}
 		}
+	}
+
+	if body.contentType != "" && request.Header.Get("Content-Type") == "" {
+		request.Header.Set("Content-Type", body.contentType)
 	}
 
 	response, doErr := r.lowLevelClient.Do(request)

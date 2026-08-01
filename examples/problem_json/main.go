@@ -44,7 +44,7 @@ func main() {
 
 	// The caller asks for the success type. err is only for network failures —
 	// a 422 is a valid HTTP response, not an error here.
-	resp, err := client.Post[CreateUser](context.Background(), server.URL, httpclient.JSON(CreateUser{Name: ""}))
+	resp, err := client.Post[CreateUser](context.Background(), server.URL, CreateUser{Name: ""})
 	if err != nil {
 		log.Fatalf("network error: %v", err)
 	}
