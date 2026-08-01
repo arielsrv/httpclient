@@ -2,6 +2,8 @@ package httpclient
 
 import (
 	"fmt"
+	"mime"
+	"net/http"
 
 	"github.com/go-playground/form/v4"
 )
@@ -37,9 +39,61 @@ func Form(v any) Body {
 		return Body{err: fmt.Errorf("form: %w", err)}
 	}
 	return Body{
-		contentType: "application/x-www-form-urlencoded",
+		contentType: mimeForm,
 		data:        []byte(values.Encode()),
 	}
+}
+
+// AsJSON returns an [http.Header] with Content-Type set to application/json.
+// Pass it to Post/Put/Patch to encode the payload as JSON (this is also the default).
+func AsJSON() http.Header { return http.Header{contentTypeHeader: []string{mimeJSON}} }
+
+// AsXML returns an [http.Header] with Content-Type set to application/xml.
+// Pass it to Post/Put/Patch to encode the payload as XML.
+func AsXML() http.Header { return http.Header{contentTypeHeader: []string{mimeXML}} }
+
+// AsForm returns an [http.Header] with Content-Type set to application/x-www-form-urlencoded.
+// Pass it to Post/Put/Patch to encode the payload as a form.
+func AsForm() http.Header { return http.Header{contentTypeHeader: []string{mimeForm}} }
+
+// AcceptJSON returns an [http.Header] with Accept set to application/json.
+// Pass it to Get/Post/etc. to request a JSON response from the server.
+func AcceptJSON() http.Header { return http.Header{acceptHeader: []string{mimeJSON}} }
+
+// AcceptXML returns an [http.Header] with Accept set to application/xml.
+// Pass it to Get/Post/etc. to request an XML response from the server.
+func AcceptXML() http.Header { return http.Header{acceptHeader: []string{mimeXML}} }
+
+// AcceptBinary returns an [http.Header] with Accept set to application/octet-stream.
+// Use with Get[[]byte] to download raw binary content — the response bytes are
+// returned directly in Data() without any codec unmarshaling.
+func AcceptBinary() http.Header { return http.Header{acceptHeader: []string{mimeBinary}} }
+
+// found in headers. Falls back to JSON when no Content-Type is present.
+// application/x-www-form-urlencoded is handled via Form encoding.
+func bodyFromHeaders(v any, headers []http.Header) Body {
+	ct := contentTypeFromHeaders(headers)
+	if ct == "" {
+		return encodeBody(jsonCodec{}, v)
+	}
+
+	mediaType, _, _ := mime.ParseMediaType(ct)
+	if mediaType == mimeForm {
+		return Form(v)
+	}
+
+	return encodeBody(codecForContentType(ct), v)
+}
+
+// contentTypeFromHeaders returns the first Content-Type value found across all
+// provided header maps, or empty string if none is set.
+func contentTypeFromHeaders(headers []http.Header) string {
+	for _, h := range headers {
+		if ct := h.Get(contentTypeHeader); ct != "" {
+			return ct
+		}
+	}
+	return ""
 }
 
 func encodeBody(c Codec, v any) Body {

@@ -1,1 +1,4 @@
-.idea
+.idea*.ico
+.idea/
+coverage.out
+coverage_no_mock.out

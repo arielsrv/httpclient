@@ -3,8 +3,19 @@ package httpclient
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"mime"
+	"net/http"
 	"strings"
+)
+
+const (
+	contentTypeHeader = "Content-Type"
+	acceptHeader      = "Accept"
+	mimeJSON          = "application/json"
+	mimeXML           = "application/xml"
+	mimeForm          = "application/x-www-form-urlencoded"
+	mimeBinary        = "application/octet-stream"
 )
 
 // Codec (de)serializes a single media type. Request bodies are encoded with the
@@ -18,29 +29,62 @@ type Codec interface {
 
 type jsonCodec struct{}
 
-func (jsonCodec) ContentType() string                { return "application/json" }
+func (jsonCodec) ContentType() string                { return mimeJSON }
 func (jsonCodec) Marshal(v any) ([]byte, error)      { return json.Marshal(v) }
 func (jsonCodec) Unmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 type xmlCodec struct{}
 
-func (xmlCodec) ContentType() string                { return "application/xml" }
+func (xmlCodec) ContentType() string                { return mimeXML }
 func (xmlCodec) Marshal(v any) ([]byte, error)      { return xml.Marshal(v) }
 func (xmlCodec) Unmarshal(data []byte, v any) error { return xml.Unmarshal(data, v) }
 
-// defaultCodec is used when a response omits Content-Type or advertises an
+type byteCodec struct{}
+
+func (byteCodec) ContentType() string { return mimeBinary }
+func (byteCodec) Marshal(v any) ([]byte, error) {
+	b, ok := v.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("byteCodec: value must be []byte, got %T", v)
+	}
+	return b, nil
+}
+
+func (byteCodec) Unmarshal(data []byte, v any) error {
+	ptr, ok := v.(*[]byte)
+	if !ok {
+		return fmt.Errorf("byteCodec: target must be *[]byte, got %T", v)
+	}
+	*ptr = data
+	return nil
+}
+
+// by defaultCodec is used when a response omits Content-Type or advertises an
 // unrecognized media type. JSON keeps backward compatibility with the original
 // hardcoded behavior.
 var defaultCodec Codec = jsonCodec{}
 
 // codecRegistry maps a media type to its codec for response content negotiation.
 var codecRegistry = map[string]Codec{
-	"application/json": jsonCodec{},
-	"application/xml":  xmlCodec{},
-	"text/xml":         xmlCodec{},
+	mimeJSON:   jsonCodec{},
+	mimeXML:    xmlCodec{},
+	"text/xml": xmlCodec{},
+	mimeBinary: byteCodec{},
 }
 
-// codecForContentType negotiates a response codec from a Content-Type header,
+// codecForAcceptHeader returns the codec matching the Accept header from the
+// caller's request headers, or nil if no Accept header is present or recognized.
+// This lets callers like AcceptBinary() drive codec selection independently of
+// whatever Content-Type the server responds with.
+func codecForAcceptHeader(headers []http.Header) Codec {
+	for _, h := range headers {
+		if accept := h.Get(acceptHeader); accept != "" {
+			return codecForContentType(accept)
+		}
+	}
+	return nil
+}
+
 // tolerating parameters like "; charset=utf-8". Falls back to defaultCodec.
 func codecForContentType(header string) Codec {
 	if header == "" {

@@ -242,7 +242,8 @@ func TestPost_JSONBody(t *testing.T) {
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Post[testUser](
-		context.Background(), server.URL, httpclient.JSON(testUser{ID: 1, Name: "Alice"}))
+		context.Background(), server.URL, testUser{ID: 1, Name: "Alice"},
+		http.Header{"Content-Type": []string{"application/json"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPost, captured.method)
@@ -262,7 +263,8 @@ func TestPost_XMLBody_And_XMLResponse(t *testing.T) {
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Post[xmlUser](
-		context.Background(), server.URL, httpclient.XML(xmlUser{ID: 7, Name: "Bob"}))
+		context.Background(), server.URL, xmlUser{ID: 7, Name: "Bob"},
+		http.Header{"Content-Type": []string{"application/xml"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "application/xml", captured.contentType)
@@ -278,12 +280,13 @@ func TestForm_StructWithTags(t *testing.T) {
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
-	body := httpclient.Form(struct {
+	body := struct {
 		ID   int    `form:"id"`
 		Item string `form:"item"`
-	}{ID: 42, Item: "book"})
+	}{ID: 42, Item: "book"}
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "application/x-www-form-urlencoded", captured.contentType)
@@ -296,14 +299,15 @@ func TestForm_OmitemptyDashAndFieldName(t *testing.T) {
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
-	body := httpclient.Form(struct {
+	body := struct {
 		Query    string `form:"q"`
 		Page     int    `form:"page,omitempty"` // zero → skipped
 		Internal string `form:"-"`              // never sent
 		Untagged string // uses field name
-	}{Query: "go", Page: 0, Internal: "secret", Untagged: "x"})
+	}{Query: "go", Page: 0, Internal: "secret", Untagged: "x"}
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "go", captured.form.Get("q"))
@@ -318,11 +322,12 @@ func TestForm_SliceRepeatsKey(t *testing.T) {
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
-	body := httpclient.Form(struct {
+	body := struct {
 		Tags []string `form:"tag"`
-	}{Tags: []string{"a", "b"}})
+	}{Tags: []string{"a", "b"}}
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"a", "b"}, captured.form["tag"])
@@ -334,12 +339,13 @@ func TestForm_NilPointerSkipped(t *testing.T) {
 	defer server.Close()
 
 	limit := 10
-	body := httpclient.Form(struct {
+	body := struct {
 		Limit *int `form:"limit"`
 		Cap   *int `form:"cap"`
-	}{Limit: &limit, Cap: nil})
+	}{Limit: &limit, Cap: nil}
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, "10", captured.form.Get("limit"))
@@ -351,15 +357,16 @@ func TestForm_NestedStruct(t *testing.T) {
 	server, captured := echoServer(t, http.StatusOK, "", nil)
 	defer server.Close()
 
-	body := httpclient.Form(struct {
+	body := struct {
 		Inner struct {
 			X int `form:"x"`
 		} `form:"inner"`
 	}{Inner: struct {
 		X int `form:"x"`
-	}{X: 5}})
+	}{X: 5}}
 
-	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body)
+	_, err := httpclient.NewHTTPClient().Post[any](context.Background(), server.URL, body,
+		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
 	require.NoError(t, err)
 
 	// go-playground/form encodes nested fields with dotted keys.
@@ -370,7 +377,7 @@ func TestPost_EncodeError(t *testing.T) {
 	t.Parallel()
 	// A channel cannot be marshaled to JSON — the error must surface on send.
 	_, err := httpclient.NewHTTPClient().Post[any](
-		context.Background(), "http://example.com", httpclient.JSON(make(chan int)))
+		context.Background(), "http://example.com", make(chan int))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encoding request body")
 }
@@ -381,7 +388,8 @@ func TestPut_SendsBodyAndMethod(t *testing.T) {
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Put[testUser](
-		context.Background(), server.URL, httpclient.JSON(testUser{ID: 2, Name: "Dave"}))
+		context.Background(), server.URL, testUser{ID: 2, Name: "Dave"},
+		http.Header{"Content-Type": []string{"application/json"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPut, captured.method)
@@ -394,7 +402,8 @@ func TestPatch_SendsBodyAndMethod(t *testing.T) {
 	defer server.Close()
 
 	_, err := httpclient.NewHTTPClient().Patch[any](
-		context.Background(), server.URL, httpclient.JSON(map[string]string{"name": "Eve"}))
+		context.Background(), server.URL, map[string]string{"name": "Eve"},
+		http.Header{"Content-Type": []string{"application/json"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPatch, captured.method)
@@ -420,7 +429,8 @@ func TestPostAsync_Await(t *testing.T) {
 	defer server.Close()
 
 	future := httpclient.NewHTTPClient().PostAsync[testUser](
-		context.Background(), server.URL, httpclient.JSON(testUser{ID: 5, Name: "Grace"}))
+		context.Background(), server.URL, testUser{ID: 5, Name: "Grace"},
+		http.Header{"Content-Type": []string{"application/json"}})
 
 	resp, err := future.Await()
 	require.NoError(t, err)
@@ -440,10 +450,12 @@ func TestVerbAsync_MethodsReachServer(t *testing.T) {
 		method string
 	}{
 		{"Put", func(u string) *httpclient.Future[any] {
-			return client.PutAsync[any](ctx, u, httpclient.JSON(map[string]int{"n": 1}))
+			return client.PutAsync[any](ctx, u, map[string]int{"n": 1},
+				http.Header{"Content-Type": []string{"application/json"}})
 		}, http.MethodPut},
 		{"Patch", func(u string) *httpclient.Future[any] {
-			return client.PatchAsync[any](ctx, u, httpclient.JSON(map[string]int{"n": 1}))
+			return client.PatchAsync[any](ctx, u, map[string]int{"n": 1},
+				http.Header{"Content-Type": []string{"application/json"}})
 		}, http.MethodPatch},
 		{"Delete", func(u string) *httpclient.Future[any] {
 			return client.DeleteAsync[any](ctx, u)
@@ -764,6 +776,22 @@ func TestHTTPClient_Get_WithHeaders(t *testing.T) {
 	assert.Equal(t, "abc-456", received.Get("X-Request-Id"))
 }
 
+func TestHTTPClient_Get_Binary(t *testing.T) {
+	t.Parallel()
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Download(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, payload, resp.Data())
+}
+
 // TestHTTPClient_Get_InvalidURL covers the NewRequestWithContext error branch
 // (null byte makes [url.Parse] reject the URL).
 func TestHTTPClient_Get_InvalidURL(t *testing.T) {
@@ -820,4 +848,116 @@ func TestHTTPClient_Get_InvalidJSONResponse(t *testing.T) {
 	_, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deserializing response")
+}
+
+// TestDownloadAsync_Await verifies that DownloadAsync returns a Future whose Await
+// delivers the raw bytes.
+func TestDownloadAsync_Await(t *testing.T) {
+	t.Parallel()
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().DownloadAsync(context.Background(), server.URL).Await()
+	require.NoError(t, err)
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, payload, resp.Data())
+}
+
+// TestGet_AcceptJSON_ForcesCodingViaAcceptHeader verifies that AcceptJSON drives
+// JSON codec selection even when the server omits Content-Type.
+func TestGet_AcceptJSON_ForcesCodingViaAcceptHeader(t *testing.T) {
+	t.Parallel()
+	user := testUser{ID: 99, Name: "Hana"}
+	server, _ := echoServer(t, http.StatusOK, "application/json", mustMarshalJSON(t, user))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL, httpclient.AcceptJSON())
+	require.NoError(t, err)
+	assert.Equal(t, user.Name, resp.Data().Name)
+}
+
+// TestGet_AcceptXML_ForcesCodingViaAcceptHeader verifies that AcceptXML drives
+// XML codec selection.
+func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
+	t.Parallel()
+	body, err := xml.Marshal(xmlUser{ID: 11, Name: "Ivar"})
+	require.NoError(t, err)
+	server, _ := echoServer(t, http.StatusOK, "application/xml", body)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL, httpclient.AcceptXML())
+	require.NoError(t, err)
+	assert.Equal(t, "Ivar", resp.Data().Name)
+}
+
+// TestPost_DefaultJSON_WhenNoContentTypeHeader verifies that Post defaults to JSON
+// when the caller does not pass a Content-Type header. This exercises the
+// body.contentType != "" && request.Header.Get("Content-Type") == "" branch in doRequest.
+func TestPost_DefaultJSON_WhenNoContentTypeHeader(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Jan"}`))
+	defer server.Close()
+
+	// No explicit Content-Type header — bodyFromHeaders defaults to JSON.
+	resp, err := httpclient.NewHTTPClient().Post[testUser](
+		context.Background(), server.URL, testUser{ID: 1, Name: "Jan"})
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", captured.contentType)
+	assert.JSONEq(t, `{"id":1,"name":"Jan"}`, string(captured.body))
+	assert.Equal(t, "Jan", resp.Data().Name)
+}
+
+// TestPost_AsJSON_Helper verifies the AsJSON() helper produces a valid request.
+func TestPost_AsJSON_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, testUser{ID: 2, Name: "Kai"}, httpclient.AsJSON())
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", captured.contentType)
+}
+
+// TestPost_AsXML_Helper verifies the AsXML() helper produces a valid XML request.
+func TestPost_AsXML_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, xmlUser{ID: 3, Name: "Lena"}, httpclient.AsXML())
+	require.NoError(t, err)
+	assert.Equal(t, "application/xml", captured.contentType)
+	assert.Contains(t, string(captured.body), "<name>Lena</name>")
+}
+
+// TestPost_AsForm_Helper verifies the AsForm() helper encodes as form data.
+func TestPost_AsForm_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	body := struct {
+		Name string `form:"name"`
+	}{Name: "Mia"}
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, body, httpclient.AsForm())
+	require.NoError(t, err)
+	assert.Equal(t, "application/x-www-form-urlencoded", captured.contentType)
+	assert.Equal(t, "Mia", captured.form.Get("name"))
+}
+
+// mustMarshalJSON is a test helper that marshals v to JSON or fails the test.
+func mustMarshalJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
 }

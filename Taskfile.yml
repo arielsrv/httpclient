@@ -17,6 +17,9 @@ tasks:
       -   task: lint-tools
       - cd ..
       -   task: lint-tools
+  test:nil:
+    cmds:
+      - go tool nilaway ./...
   test:race:
     cmds:
       - go test -race -count 5 ./... -v
