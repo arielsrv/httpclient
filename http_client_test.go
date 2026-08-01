@@ -780,13 +780,13 @@ func TestHTTPClient_Get_Binary(t *testing.T) {
 	t.Parallel()
 	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(payload)
 	}))
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().Get[[]byte](context.Background(), server.URL, httpclient.AcceptBinary())
+	resp, err := httpclient.NewHTTPClient().Download(context.Background(), server.URL)
 	require.NoError(t, err)
 	assert.True(t, resp.IsSuccess())
 	assert.Equal(t, payload, resp.Data())

@@ -58,6 +58,12 @@ func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http
 	return r.doRequest[T](ctx, http.MethodGet, url, Body{}, headers...)
 }
 
+// Download fetches url and returns the raw response bytes. It is a convenience
+// wrapper around Get[[]byte] with AcceptBinary() — no codec is involved.
+func (r *HTTPClient) Download(ctx context.Context, url string, headers ...http.Header) (HTTPResponse[[]byte], error) {
+	return r.Get[[]byte](ctx, url, append(headers, AcceptBinary())...)
+}
+
 // Post encodes payload using the codec matching the Content-Type header (defaults
 // to application/json) and decodes the response into T.
 func (r *HTTPClient) Post[T any](

@@ -12,11 +12,10 @@ import (
 func main() {
 	client := httpclient.NewHTTPClient()
 
-	// Download a small public PNG — Data() returns the raw []byte directly,
-	// no codec unmarshaling involved.
+	// Download returns raw []byte directly — no Content-Type negotiation needed.
 	const url = "https://www.google.com/favicon.ico"
 
-	resp, err := client.Get[[]byte](context.Background(), url, httpclient.AcceptBinary())
+	resp, err := client.Download(context.Background(), url)
 	if err != nil {
 		log.Fatalf("network error: %v", err)
 	}
