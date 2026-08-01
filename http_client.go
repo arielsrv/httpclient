@@ -64,6 +64,11 @@ func (r *HTTPClient) Download(ctx context.Context, url string, headers ...http.H
 	return r.Get[[]byte](ctx, url, append(headers, AcceptBinary())...)
 }
 
+// DownloadAsync fires a Download in a goroutine and returns a Future immediately.
+func (r *HTTPClient) DownloadAsync(ctx context.Context, url string, headers ...http.Header) *Future[[]byte] {
+	return async(func() (HTTPResponse[[]byte], error) { return r.Download(ctx, url, headers...) })
+}
+
 // Post encodes payload using the codec matching the Content-Type header (defaults
 // to application/json) and decodes the response into T.
 func (r *HTTPClient) Post[T any](
