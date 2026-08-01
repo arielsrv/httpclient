@@ -849,3 +849,115 @@ func TestHTTPClient_Get_InvalidJSONResponse(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deserializing response")
 }
+
+// TestDownloadAsync_Await verifies that DownloadAsync returns a Future whose Await
+// delivers the raw bytes.
+func TestDownloadAsync_Await(t *testing.T) {
+	t.Parallel()
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().DownloadAsync(context.Background(), server.URL).Await()
+	require.NoError(t, err)
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, payload, resp.Data())
+}
+
+// TestGet_AcceptJSON_ForcesCodingViaAcceptHeader verifies that AcceptJSON drives
+// JSON codec selection even when the server omits Content-Type.
+func TestGet_AcceptJSON_ForcesCodingViaAcceptHeader(t *testing.T) {
+	t.Parallel()
+	user := testUser{ID: 99, Name: "Hana"}
+	server, _ := echoServer(t, http.StatusOK, "application/json", mustMarshalJSON(t, user))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL, httpclient.AcceptJSON())
+	require.NoError(t, err)
+	assert.Equal(t, user.Name, resp.Data().Name)
+}
+
+// TestGet_AcceptXML_ForcesCodingViaAcceptHeader verifies that AcceptXML drives
+// XML codec selection.
+func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
+	t.Parallel()
+	body, err := xml.Marshal(xmlUser{ID: 11, Name: "Ivar"})
+	require.NoError(t, err)
+	server, _ := echoServer(t, http.StatusOK, "application/xml", body)
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL, httpclient.AcceptXML())
+	require.NoError(t, err)
+	assert.Equal(t, "Ivar", resp.Data().Name)
+}
+
+// TestPost_DefaultJSON_WhenNoContentTypeHeader verifies that Post defaults to JSON
+// when the caller does not pass a Content-Type header. This exercises the
+// body.contentType != "" && request.Header.Get("Content-Type") == "" branch in doRequest.
+func TestPost_DefaultJSON_WhenNoContentTypeHeader(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Jan"}`))
+	defer server.Close()
+
+	// No explicit Content-Type header — bodyFromHeaders defaults to JSON.
+	resp, err := httpclient.NewHTTPClient().Post[testUser](
+		context.Background(), server.URL, testUser{ID: 1, Name: "Jan"})
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", captured.contentType)
+	assert.JSONEq(t, `{"id":1,"name":"Jan"}`, string(captured.body))
+	assert.Equal(t, "Jan", resp.Data().Name)
+}
+
+// TestPost_AsJSON_Helper verifies the AsJSON() helper produces a valid request.
+func TestPost_AsJSON_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, testUser{ID: 2, Name: "Kai"}, httpclient.AsJSON())
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", captured.contentType)
+}
+
+// TestPost_AsXML_Helper verifies the AsXML() helper produces a valid XML request.
+func TestPost_AsXML_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, xmlUser{ID: 3, Name: "Lena"}, httpclient.AsXML())
+	require.NoError(t, err)
+	assert.Equal(t, "application/xml", captured.contentType)
+	assert.Contains(t, string(captured.body), "<name>Lena</name>")
+}
+
+// TestPost_AsForm_Helper verifies the AsForm() helper encodes as form data.
+func TestPost_AsForm_Helper(t *testing.T) {
+	t.Parallel()
+	server, captured := echoServer(t, http.StatusOK, "", nil)
+	defer server.Close()
+
+	body := struct {
+		Name string `form:"name"`
+	}{Name: "Mia"}
+
+	_, err := httpclient.NewHTTPClient().Post[any](
+		context.Background(), server.URL, body, httpclient.AsForm())
+	require.NoError(t, err)
+	assert.Equal(t, "application/x-www-form-urlencoded", captured.contentType)
+	assert.Equal(t, "Mia", captured.form.Get("name"))
+}
+
+// mustMarshalJSON is a test helper that marshals v to JSON or fails the test.
+func mustMarshalJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
+}
