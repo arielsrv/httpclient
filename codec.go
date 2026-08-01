@@ -9,6 +9,7 @@ import (
 
 const (
 	contentTypeHeader = "Content-Type"
+	acceptHeader      = "Accept"
 	mimeJSON          = "application/json"
 	mimeXML           = "application/xml"
 	mimeForm          = "application/x-www-form-urlencoded"

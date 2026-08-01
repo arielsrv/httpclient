@@ -56,6 +56,14 @@ func AsXML() http.Header { return http.Header{contentTypeHeader: []string{mimeXM
 // Pass it to Post/Put/Patch to encode the payload as a form.
 func AsForm() http.Header { return http.Header{contentTypeHeader: []string{mimeForm}} }
 
+// AcceptJSON returns an [http.Header] with Accept set to application/json.
+// Pass it to Get/Post/etc. to request a JSON response from the server.
+func AcceptJSON() http.Header { return http.Header{acceptHeader: []string{mimeJSON}} }
+
+// AcceptXML returns an [http.Header] with Accept set to application/xml.
+// Pass it to Get/Post/etc. to request an XML response from the server.
+func AcceptXML() http.Header { return http.Header{acceptHeader: []string{mimeXML}} }
+
 // found in headers. Falls back to JSON when no Content-Type is present.
 // application/x-www-form-urlencoded is handled via Form encoding.
 func bodyFromHeaders(v any, headers []http.Header) Body {
