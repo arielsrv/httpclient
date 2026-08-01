@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
-	"net/http"
 
 	"github.com/arielsrv/httpclient"
 )
@@ -37,12 +36,9 @@ func main() {
 	// One client, three content types, one struct — set Content-Type in the
 	// header and the client picks the right codec automatically.
 	// Fire all three concurrently; total ≈ the slowest request.
-	jsonFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order,
-		http.Header{"Content-Type": []string{"application/json"}})
-	xmlFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order,
-		http.Header{"Content-Type": []string{"application/xml"}})
-	formFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order,
-		http.Header{"Content-Type": []string{"application/x-www-form-urlencoded"}})
+	jsonFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order, httpclient.AsJSON())
+	xmlFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order, httpclient.AsXML())
+	formFuture := client.PostAsync[httpbinResponse](ctx, endpoint, order, httpclient.AsForm())
 
 	jsonResp := await(jsonFuture, "JSON")
 	fmt.Printf("JSON  → Content-Type: %s | server parsed: %v\n",

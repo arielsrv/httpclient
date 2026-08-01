@@ -39,12 +39,23 @@ func Form(v any) Body {
 		return Body{err: fmt.Errorf("form: %w", err)}
 	}
 	return Body{
-		contentType: "application/x-www-form-urlencoded",
+		contentType: mimeForm,
 		data:        []byte(values.Encode()),
 	}
 }
 
-// bodyFromHeaders encodes v using the codec that matches the Content-Type header
+// AsJSON returns an [http.Header] with Content-Type set to application/json.
+// Pass it to Post/Put/Patch to encode the payload as JSON (this is also the default).
+func AsJSON() http.Header { return http.Header{contentTypeHeader: []string{mimeJSON}} }
+
+// AsXML returns an [http.Header] with Content-Type set to application/xml.
+// Pass it to Post/Put/Patch to encode the payload as XML.
+func AsXML() http.Header { return http.Header{contentTypeHeader: []string{mimeXML}} }
+
+// AsForm returns an [http.Header] with Content-Type set to application/x-www-form-urlencoded.
+// Pass it to Post/Put/Patch to encode the payload as a form.
+func AsForm() http.Header { return http.Header{contentTypeHeader: []string{mimeForm}} }
+
 // found in headers. Falls back to JSON when no Content-Type is present.
 // application/x-www-form-urlencoded is handled via Form encoding.
 func bodyFromHeaders(v any, headers []http.Header) Body {
@@ -54,7 +65,7 @@ func bodyFromHeaders(v any, headers []http.Header) Body {
 	}
 
 	mediaType, _, _ := mime.ParseMediaType(ct)
-	if mediaType == "application/x-www-form-urlencoded" {
+	if mediaType == mimeForm {
 		return Form(v)
 	}
 
@@ -65,7 +76,7 @@ func bodyFromHeaders(v any, headers []http.Header) Body {
 // provided header maps, or empty string if none is set.
 func contentTypeFromHeaders(headers []http.Header) string {
 	for _, h := range headers {
-		if ct := h.Get("Content-Type"); ct != "" {
+		if ct := h.Get(contentTypeHeader); ct != "" {
 			return ct
 		}
 	}

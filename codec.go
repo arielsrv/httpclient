@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+const (
+	contentTypeHeader = "Content-Type"
+	mimeJSON          = "application/json"
+	mimeXML           = "application/xml"
+	mimeForm          = "application/x-www-form-urlencoded"
+)
+
 // Codec (de)serializes a single media type. Request bodies are encoded with the
 // codec chosen by the Body wrapper (JSON/XML/Form); responses are decoded with
 // the codec negotiated from the response Content-Type.
@@ -18,13 +25,13 @@ type Codec interface {
 
 type jsonCodec struct{}
 
-func (jsonCodec) ContentType() string                { return "application/json" }
+func (jsonCodec) ContentType() string                { return mimeJSON }
 func (jsonCodec) Marshal(v any) ([]byte, error)      { return json.Marshal(v) }
 func (jsonCodec) Unmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 type xmlCodec struct{}
 
-func (xmlCodec) ContentType() string                { return "application/xml" }
+func (xmlCodec) ContentType() string                { return mimeXML }
 func (xmlCodec) Marshal(v any) ([]byte, error)      { return xml.Marshal(v) }
 func (xmlCodec) Unmarshal(data []byte, v any) error { return xml.Unmarshal(data, v) }
 
@@ -35,9 +42,9 @@ var defaultCodec Codec = jsonCodec{}
 
 // codecRegistry maps a media type to its codec for response content negotiation.
 var codecRegistry = map[string]Codec{
-	"application/json": jsonCodec{},
-	"application/xml":  xmlCodec{},
-	"text/xml":         xmlCodec{},
+	mimeJSON:   jsonCodec{},
+	mimeXML:    xmlCodec{},
+	"text/xml": xmlCodec{},
 }
 
 // codecForContentType negotiates a response codec from a Content-Type header,
