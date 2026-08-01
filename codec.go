@@ -3,6 +3,7 @@ package httpclient
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"mime"
 	"strings"
 )
@@ -37,6 +38,26 @@ func (xmlCodec) ContentType() string                { return mimeXML }
 func (xmlCodec) Marshal(v any) ([]byte, error)      { return xml.Marshal(v) }
 func (xmlCodec) Unmarshal(data []byte, v any) error { return xml.Unmarshal(data, v) }
 
+type byteCodec struct{}
+
+func (byteCodec) ContentType() string { return mimeBinary }
+func (byteCodec) Marshal(v any) ([]byte, error) {
+	b, ok := v.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("byteCodec: value must be []byte, got %T", v)
+	}
+	return b, nil
+}
+
+func (byteCodec) Unmarshal(data []byte, v any) error {
+	ptr, ok := v.(*[]byte)
+	if !ok {
+		return fmt.Errorf("byteCodec: target must be *[]byte, got %T", v)
+	}
+	*ptr = data
+	return nil
+}
+
 // by defaultCodec is used when a response omits Content-Type or advertises an
 // unrecognized media type. JSON keeps backward compatibility with the original
 // hardcoded behavior.
@@ -47,6 +68,7 @@ var codecRegistry = map[string]Codec{
 	mimeJSON:   jsonCodec{},
 	mimeXML:    xmlCodec{},
 	"text/xml": xmlCodec{},
+	mimeBinary: byteCodec{},
 }
 
 // codecForContentType negotiates a response codec from a Content-Type header,
