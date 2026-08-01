@@ -4,41 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"net/http/httptest"
 
 	"github.com/arielsrv/httpclient"
 )
 
 func main() {
 	ctx := context.Background()
+	redirectURL := "https://httpbingo.org/redirect-to?url=https://example.com"
 
-	// target: the final destination
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, `{"arrived": true}`)
-	}))
-	defer target.Close()
-
-	// redirect server issues 302 → target
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusFound)
-	}))
-	defer redirect.Close()
-
-	// WithFollowRedirects(true) — client follows the 302 and returns the final 200.
+	// WithFollowRedirects(true) — client follows the redirect and returns the final 200.
+	// Download is used so the response body (HTML from example.com) is not
+	// passed through a JSON codec — we only care about the status code here.
 	fmt.Println("=== WithFollowRedirects(true) ===")
 	following := httpclient.NewHTTPClient(httpclient.WithFollowRedirects(true))
-	resp, err := following.Get[any](ctx, redirect.URL)
+	resp, err := following.Download(ctx, redirectURL)
 	if err != nil {
 		log.Fatalf("request error: %v", err)
 	}
-	fmt.Printf("  status: %d  (followed redirect → %s)\n", resp.StatusCode(), target.URL)
+	fmt.Printf("  status: %d  (followed redirect to https://example.com)\n", resp.StatusCode())
 
-	// WithFollowRedirects(false) — client stops at the 302 and exposes Location.
+	// WithFollowRedirects(false) — client stops at the first 3xx and exposes Location.
 	fmt.Println("\n=== WithFollowRedirects(false) ===")
 	noFollow := httpclient.NewHTTPClient(httpclient.WithFollowRedirects(false))
-	resp2, err := noFollow.Get[any](ctx, redirect.URL)
+	resp2, err := noFollow.Download(ctx, redirectURL)
 	if err != nil {
 		log.Fatalf("request error: %v", err)
 	}
