@@ -175,7 +175,13 @@ func (r *HTTPClient) doRequest[T any](
 		return HTTPResponse[T]{}, fmt.Errorf("closing response body: %w", closeErr)
 	}
 
+	// When T is []byte the caller wants raw bytes regardless of what Content-Type
+	// the server advertises — use byteCodec directly.
+	var zero T
 	codec := codecForContentType(response.Header.Get("Content-Type"))
+	if _, ok := any(zero).([]byte); ok {
+		codec = byteCodec{}
+	}
 
 	result := HTTPResponse[T]{
 		statusCode: response.StatusCode,
