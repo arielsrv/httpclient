@@ -41,6 +41,22 @@ func WithTimeout(d time.Duration) ClientOption {
 	}
 }
 
+// WithFollowRedirects controls whether the client follows HTTP redirects (3xx).
+// By default the standard library follows up to 10 redirects automatically.
+// Pass false to disable redirect following entirely — the first 3xx response is
+// returned as-is so the caller can inspect Location and decide what to do.
+func WithFollowRedirects(follow bool) ClientOption {
+	return func(c *HTTPClient) {
+		if !follow {
+			c.lowLevelClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		} else {
+			c.lowLevelClient.CheckRedirect = nil // restore default
+		}
+	}
+}
+
 func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	httpClient := &HTTPClient{
 		lowLevelClient: http.Client{

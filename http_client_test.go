@@ -954,6 +954,65 @@ func TestPost_AsForm_Helper(t *testing.T) {
 	assert.Equal(t, "Mia", captured.form.Get("name"))
 }
 
+// --- WithFollowRedirects ---
+
+func TestWithFollowRedirects_True_FollowsRedirect(t *testing.T) {
+	t.Parallel()
+	// target returns 200
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	// redirect server issues 302 → target
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	client := httpclient.NewHTTPClient(httpclient.WithFollowRedirects(true))
+	resp, err := client.Get[any](context.Background(), redirect.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+}
+
+func TestWithFollowRedirects_False_ReturnsRedirectResponse(t *testing.T) {
+	t.Parallel()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	client := httpclient.NewHTTPClient(httpclient.WithFollowRedirects(false))
+	resp, err := client.Get[any](context.Background(), redirect.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusFound, resp.StatusCode())
+	assert.Contains(t, resp.Headers().Get("Location"), target.URL)
+}
+
+func TestWithFollowRedirects_DefaultFollows(t *testing.T) {
+	t.Parallel()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusMovedPermanently)
+	}))
+	defer redirect.Close()
+
+	// Default client (no option) must follow redirects.
+	resp, err := httpclient.NewHTTPClient().Get[any](context.Background(), redirect.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+}
+
 // mustMarshalJSON is a test helper that marshals v to JSON or fails the test.
 func mustMarshalJSON(t *testing.T, v any) []byte {
 	t.Helper()
