@@ -58,7 +58,7 @@ func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http
 	return r.doRequest[T](ctx, http.MethodGet, url, Body{}, headers...)
 }
 
-// Post sends body (built with JSON/XML/Form) and decodes the response into T.
+// Post sends the body (built with JSON/XML/Form) and decodes the response into T.
 func (r *HTTPClient) Post[T any](
 	ctx context.Context,
 	url string,
@@ -125,11 +125,9 @@ func (r *HTTPClient) doRequest[T any](
 	url string,
 	body Body,
 	headers ...http.Header,
-) (_ HTTPResponse[T], err error) {
-	var result HTTPResponse[T]
-
+) (HTTPResponse[T], error) {
 	if body.err != nil {
-		return result, fmt.Errorf("encoding request body: %w", body.err)
+		return HTTPResponse[T]{}, fmt.Errorf("encoding request body: %w", body.err)
 	}
 
 	var reader io.Reader
@@ -139,7 +137,7 @@ func (r *HTTPClient) doRequest[T any](
 
 	request, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return result, fmt.Errorf("creating request: %w", err)
+		return HTTPResponse[T]{}, fmt.Errorf("creating request: %w", err)
 	}
 
 	if body.contentType != "" {
@@ -154,24 +152,24 @@ func (r *HTTPClient) doRequest[T any](
 		}
 	}
 
-	response, err := r.lowLevelClient.Do(request)
-	if err != nil {
-		return result, fmt.Errorf("network error: %w", err)
+	response, doErr := r.lowLevelClient.Do(request)
+	if doErr != nil {
+		return HTTPResponse[T]{}, fmt.Errorf("network error: %w", doErr)
 	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("closing response body: %w", closeErr)
-		}
-	}()
 
-	bodyBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		return result, fmt.Errorf("reading response body: %w", err)
+	bodyBytes, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+
+	if readErr != nil {
+		return HTTPResponse[T]{}, fmt.Errorf("reading response body: %w", readErr)
+	}
+	if closeErr != nil {
+		return HTTPResponse[T]{}, fmt.Errorf("closing response body: %w", closeErr)
 	}
 
 	codec := codecForContentType(response.Header.Get("Content-Type"))
 
-	result = HTTPResponse[T]{
+	result := HTTPResponse[T]{
 		statusCode: response.StatusCode,
 		body:       bodyBytes,
 		headers:    response.Header,
@@ -179,8 +177,8 @@ func (r *HTTPClient) doRequest[T any](
 	}
 
 	if result.IsSuccess() && len(bodyBytes) > 0 {
-		if err = codec.Unmarshal(bodyBytes, &result.data); err != nil {
-			return result, fmt.Errorf("deserializing response: %w", err)
+		if unmarshalErr := codec.Unmarshal(bodyBytes, &result.data); unmarshalErr != nil {
+			return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
 		}
 	}
 
