@@ -776,6 +776,22 @@ func TestHTTPClient_Get_WithHeaders(t *testing.T) {
 	assert.Equal(t, "abc-456", received.Get("X-Request-Id"))
 }
 
+func TestHTTPClient_Get_Binary(t *testing.T) {
+	t.Parallel()
+	payload := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	resp, err := httpclient.NewHTTPClient().Get[[]byte](context.Background(), server.URL, httpclient.AcceptBinary())
+	require.NoError(t, err)
+	assert.True(t, resp.IsSuccess())
+	assert.Equal(t, payload, resp.Data())
+}
+
 // TestHTTPClient_Get_InvalidURL covers the NewRequestWithContext error branch
 // (null byte makes [url.Parse] reject the URL).
 func TestHTTPClient_Get_InvalidURL(t *testing.T) {

@@ -64,6 +64,11 @@ func AcceptJSON() http.Header { return http.Header{acceptHeader: []string{mimeJS
 // Pass it to Get/Post/etc. to request an XML response from the server.
 func AcceptXML() http.Header { return http.Header{acceptHeader: []string{mimeXML}} }
 
+// AcceptBinary returns an [http.Header] with Accept set to application/octet-stream.
+// Use with Get[[]byte] to download raw binary content — the response bytes are
+// returned directly in Data() without any codec unmarshaling.
+func AcceptBinary() http.Header { return http.Header{acceptHeader: []string{mimeBinary}} }
+
 // found in headers. Falls back to JSON when no Content-Type is present.
 // application/x-www-form-urlencoded is handled via Form encoding.
 func bodyFromHeaders(v any, headers []http.Header) Body {

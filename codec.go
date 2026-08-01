@@ -13,6 +13,7 @@ const (
 	mimeJSON          = "application/json"
 	mimeXML           = "application/xml"
 	mimeForm          = "application/x-www-form-urlencoded"
+	mimeBinary        = "application/octet-stream"
 )
 
 // Codec (de)serializes a single media type. Request bodies are encoded with the
@@ -36,7 +37,7 @@ func (xmlCodec) ContentType() string                { return mimeXML }
 func (xmlCodec) Marshal(v any) ([]byte, error)      { return xml.Marshal(v) }
 func (xmlCodec) Unmarshal(data []byte, v any) error { return xml.Unmarshal(data, v) }
 
-// defaultCodec is used when a response omits Content-Type or advertises an
+// by defaultCodec is used when a response omits Content-Type or advertises an
 // unrecognized media type. JSON keeps backward compatibility with the original
 // hardcoded behavior.
 var defaultCodec Codec = jsonCodec{}

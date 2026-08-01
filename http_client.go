@@ -185,7 +185,10 @@ func (r *HTTPClient) doRequest[T any](
 	}
 
 	if result.IsSuccess() && len(bodyBytes) > 0 {
-		if unmarshalErr := codec.Unmarshal(bodyBytes, &result.data); unmarshalErr != nil {
+		// When T is []byte the caller wants the raw bytes — skip codec unmarshaling.
+		if ptr, ok := any(&result.data).(*[]byte); ok {
+			*ptr = bodyBytes
+		} else if unmarshalErr := codec.Unmarshal(bodyBytes, &result.data); unmarshalErr != nil {
 			return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
 		}
 	}
