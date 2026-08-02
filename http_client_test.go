@@ -40,7 +40,12 @@ type capturedRequest struct {
 
 // echoServer captures the incoming request and replies with the given status,
 // optionally writing rawBody with contentType.
-func echoServer(t *testing.T, status int, contentType string, rawBody []byte) (*httptest.Server, *capturedRequest) {
+func echoServer(
+	t *testing.T,
+	status int,
+	contentType string,
+	rawBody []byte,
+) (*httptest.Server, *capturedRequest) {
 	t.Helper()
 	captured := &capturedRequest{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +176,11 @@ func TestHTTPResponse_DataNotDeserializedOnNonSuccess(t *testing.T) {
 
 func TestHTTPResponse_BodyOnNonSuccess(t *testing.T) {
 	t.Parallel()
-	server := newTestServer(http.StatusUnauthorized, map[string]string{"message": "unauthorized"}, nil)
+	server := newTestServer(
+		http.StatusUnauthorized,
+		map[string]string{"message": "unauthorized"},
+		nil,
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL)
@@ -238,7 +247,12 @@ func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
 
 func TestPost_JSONBody(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Alice"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":1,"name":"Alice"}`),
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Post[testUser](
@@ -384,7 +398,12 @@ func TestPost_EncodeError(t *testing.T) {
 
 func TestPut_SendsBodyAndMethod(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusOK, "application/json", []byte(`{"id":2,"name":"Dave"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusOK,
+		"application/json",
+		[]byte(`{"id":2,"name":"Dave"}`),
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Put[testUser](
@@ -425,7 +444,12 @@ func TestDelete_NoBody(t *testing.T) {
 
 func TestPostAsync_Await(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":5,"name":"Grace"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":5,"name":"Grace"}`),
+	)
 	defer server.Close()
 
 	future := httpclient.NewHTTPClient().PostAsync[testUser](
@@ -587,7 +611,10 @@ func TestNewHTTPClient_WithCustomPool(t *testing.T) {
 
 func TestHTTPClient_Get_NetworkError(t *testing.T) {
 	t.Parallel()
-	_, err := httpclient.NewHTTPClient().Get[any](context.Background(), "http://localhost:0/invalid")
+	_, err := httpclient.NewHTTPClient().Get[any](
+		context.Background(),
+		"http://localhost:0/invalid",
+	)
 	assert.Error(t, err)
 }
 
@@ -631,7 +658,10 @@ func TestGetAsync_Await(t *testing.T) {
 	server := newTestServer(http.StatusOK, user, nil)
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().GetAsync[testUser](context.Background(), server.URL).Await()
+	resp, err := httpclient.NewHTTPClient().GetAsync[testUser](
+		context.Background(),
+		server.URL,
+	).Await()
 	require.NoError(t, err)
 	assert.True(t, resp.IsSuccess())
 	assert.Equal(t, 42, resp.Data().ID)
@@ -876,7 +906,11 @@ func TestGet_AcceptJSON_ForcesCodingViaAcceptHeader(t *testing.T) {
 	server, _ := echoServer(t, http.StatusOK, "application/json", mustMarshalJSON(t, user))
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL, httpclient.AcceptJSON())
+	resp, err := httpclient.NewHTTPClient().Get[testUser](
+		context.Background(),
+		server.URL,
+		httpclient.AcceptJSON(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, user.Name, resp.Data().Name)
 }
@@ -890,7 +924,11 @@ func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
 	server, _ := echoServer(t, http.StatusOK, "application/xml", body)
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL, httpclient.AcceptXML())
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](
+		context.Background(),
+		server.URL,
+		httpclient.AcceptXML(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "Ivar", resp.Data().Name)
 }
@@ -900,7 +938,12 @@ func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
 // body.contentType != "" && request.Header.Get("Content-Type") == "" branch in doRequest.
 func TestPost_DefaultJSON_WhenNoContentTypeHeader(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Jan"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":1,"name":"Jan"}`),
+	)
 	defer server.Close()
 
 	// No explicit Content-Type header — bodyFromHeaders defaults to JSON.
