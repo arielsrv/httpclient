@@ -55,7 +55,7 @@ func main() {
 		formResp.Data().Headers["Content-Type"], formResp.Data().Form)
 }
 
-func await(f *httpclient.Future[httpbinResponse], label string) httpclient.HTTPResponse[httpbinResponse] {
+func await(f *httpclient.Future[httpbinResponse], label string) *httpclient.HTTPResponse[httpbinResponse] {
 	resp, err := f.Await()
 	if err != nil {
 		log.Fatalf("%s network error: %v", label, err)
