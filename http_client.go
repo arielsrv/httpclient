@@ -22,7 +22,7 @@ type HTTPClient struct {
 	cacheableMethods types.Set
 	kvs              *KVS
 	pool             *Pool
-	lowLevelClient   http.Client
+	client           http.Client
 	concurrencyLevel int
 }
 
@@ -30,14 +30,14 @@ type ClientOption func(*HTTPClient)
 
 func WithConnectionPool(pool *ConnectionPool) ClientOption {
 	return func(c *HTTPClient) {
-		c.lowLevelClient.Transport = pool.transport
+		c.client.Transport = pool.transport
 	}
 }
 
 // WithTransport sets a custom RoundTripper. Useful for testing and advanced use cases.
 func WithTransport(rt http.RoundTripper) ClientOption {
 	return func(c *HTTPClient) {
-		c.lowLevelClient.Transport = rt
+		c.client.Transport = rt
 	}
 }
 
@@ -45,7 +45,7 @@ func WithTransport(rt http.RoundTripper) ClientOption {
 // Pass 0 to disable the client-level timeout and rely only on the context deadline.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *HTTPClient) {
-		c.lowLevelClient.Timeout = timeout
+		c.client.Timeout = timeout
 	}
 }
 
@@ -65,18 +65,18 @@ func WithCache(cache Cache, concurrencyLevel int) ClientOption {
 func WithFollowRedirects(follow bool) ClientOption {
 	return func(c *HTTPClient) {
 		if !follow {
-			c.lowLevelClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			c.client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 				return http.ErrUseLastResponse
 			}
 		} else {
-			c.lowLevelClient.CheckRedirect = nil // restore default
+			c.client.CheckRedirect = nil // restore default
 		}
 	}
 }
 
 func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	httpClient := &HTTPClient{
-		lowLevelClient: http.Client{
+		client: http.Client{
 			Transport: NewConnectionPool().transport,
 			Timeout:   DefaultTimeout,
 		},
@@ -94,109 +94,74 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	return httpClient
 }
 
-func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http.Header) (HTTPResponse[T], error) {
+func (r *HTTPClient) Get[T any](ctx context.Context, url string, headers ...http.Header) (*HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodGet, url, Body{}, headers...)
 }
 
 // Download fetches url and returns the raw response bytes. It is a convenience
 // wrapper around Get[[]byte] with AcceptBinary() — no codec is involved.
-func (r *HTTPClient) Download(ctx context.Context, url string, headers ...http.Header) (HTTPResponse[[]byte], error) {
+func (r *HTTPClient) Download(ctx context.Context, url string, headers ...http.Header) (*HTTPResponse[[]byte], error) {
 	return r.Get[[]byte](ctx, url, append(headers, AcceptBinary())...)
 }
 
 // DownloadAsync fires a Download in a goroutine and returns a Future immediately.
 func (r *HTTPClient) DownloadAsync(ctx context.Context, url string, headers ...http.Header) *Future[[]byte] {
-	return async(func() (HTTPResponse[[]byte], error) { return r.Download(ctx, url, headers...) })
+	return async(func() (*HTTPResponse[[]byte], error) { return r.Download(ctx, url, headers...) })
 }
 
 // Post encodes payload using the codec matching the Content-Type header (defaults
 // to application/json) and decodes the response into T.
-func (r *HTTPClient) Post[T any](
-	ctx context.Context,
-	url string,
-	payload any,
-	headers ...http.Header,
-) (HTTPResponse[T], error) {
+func (r *HTTPClient) Post[T any](ctx context.Context, url string, payload any, headers ...http.Header) (*HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPost, url, bodyFromHeaders(payload, headers), headers...)
 }
 
 // Put encodes payload using the codec matching the Content-Type header (defaults
 // to application/json) and decodes the response into T.
-func (r *HTTPClient) Put[T any](
-	ctx context.Context,
-	url string,
-	payload any,
-	headers ...http.Header,
-) (HTTPResponse[T], error) {
+func (r *HTTPClient) Put[T any](ctx context.Context, url string, payload any, headers ...http.Header,
+) (*HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPut, url, bodyFromHeaders(payload, headers), headers...)
 }
 
 // Patch encodes payload using the codec matching the Content-Type header (defaults
 // to application/json) and decodes the response into T.
-func (r *HTTPClient) Patch[T any](
-	ctx context.Context,
-	url string,
-	payload any,
-	headers ...http.Header,
-) (HTTPResponse[T], error) {
+func (r *HTTPClient) Patch[T any](ctx context.Context, url string, payload any, headers ...http.Header) (*HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodPatch, url, bodyFromHeaders(payload, headers), headers...)
 }
 
 // Delete sends a DELETE request (no body) and decodes the response into T.
-func (r *HTTPClient) Delete[T any](ctx context.Context, url string, headers ...http.Header) (HTTPResponse[T], error) {
+func (r *HTTPClient) Delete[T any](ctx context.Context, url string, headers ...http.Header) (*HTTPResponse[T], error) {
 	return r.doRequest[T](ctx, http.MethodDelete, url, Body{}, headers...)
 }
 
 // GetAsync fires a GET request in a goroutine and returns a Future immediately.
 // The context controls cancellation — cancelling ctx will unblock Await with an error.
 func (r *HTTPClient) GetAsync[T any](ctx context.Context, url string, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Get[T](ctx, url, headers...) })
+	return async(func() (*HTTPResponse[T], error) { return r.Get[T](ctx, url, headers...) })
 }
 
 // PostAsync fires a POST request in a goroutine and returns a Future immediately.
 func (r *HTTPClient) PostAsync[T any](ctx context.Context, url string, payload any, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Post[T](ctx, url, payload, headers...) })
+	return async(func() (*HTTPResponse[T], error) { return r.Post[T](ctx, url, payload, headers...) })
 }
 
 // PutAsync fires a PUT request in a goroutine and returns a Future immediately.
 func (r *HTTPClient) PutAsync[T any](ctx context.Context, url string, payload any, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Put[T](ctx, url, payload, headers...) })
+	return async(func() (*HTTPResponse[T], error) { return r.Put[T](ctx, url, payload, headers...) })
 }
 
 // PatchAsync fires a PATCH request in a goroutine and returns a Future immediately.
-func (r *HTTPClient) PatchAsync[T any](
-	ctx context.Context,
-	url string,
-	payload any,
-	headers ...http.Header,
-) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Patch[T](ctx, url, payload, headers...) })
+func (r *HTTPClient) PatchAsync[T any](ctx context.Context, url string, payload any, headers ...http.Header) *Future[T] {
+	return async(func() (*HTTPResponse[T], error) { return r.Patch[T](ctx, url, payload, headers...) })
 }
 
 // DeleteAsync fires a DELETE request in a goroutine and returns a Future immediately.
 func (r *HTTPClient) DeleteAsync[T any](ctx context.Context, url string, headers ...http.Header) *Future[T] {
-	return async(func() (HTTPResponse[T], error) { return r.Delete[T](ctx, url, headers...) })
+	return async(func() (*HTTPResponse[T], error) { return r.Delete[T](ctx, url, headers...) })
 }
 
-func (r *HTTPClient) doRequest[T any](
-	ctx context.Context,
-	method string,
-	url string,
-	body Body,
-	headers ...http.Header,
-) (HTTPResponse[T], error) {
-	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
-		value, found, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
-		if err != nil {
-			return HTTPResponse[T]{}, fmt.Errorf("getting cached response: %w", err)
-		}
-		if found && !value.Revalidate() {
-			return *value, nil
-		}
-	}
-
+func (r *HTTPClient) newRequest(ctx context.Context, method string, url string, body Body, headers ...http.Header) (*http.Request, error) {
 	if body.err != nil {
-		return HTTPResponse[T]{}, fmt.Errorf("encoding request body: %w", body.err)
+		return nil, fmt.Errorf("encoding request body: %w", body.err)
 	}
 
 	var reader io.Reader
@@ -206,37 +171,54 @@ func (r *HTTPClient) doRequest[T any](
 
 	request, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return HTTPResponse[T]{}, fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	for _, h := range headers {
-		for key, values := range h {
-			for _, value := range values {
-				request.Header.Add(key, value)
-			}
+	for header := range slices.Values(headers) {
+		for key, values := range header {
+			request.Header[key] = append(request.Header[key], values...)
 		}
 	}
 
-	if body.contentType != "" && request.Header.Get("Content-Type") == "" {
-		request.Header.Set("Content-Type", body.contentType)
+	if body.contentType != "" && request.Header.Get(contentTypeHeader) == "" {
+		request.Header.Set(contentTypeHeader, body.contentType)
 	}
 
-	response, doErr := r.lowLevelClient.Do(request)
+	return request, nil
+}
+
+func (r *HTTPClient) doRequest[T any](ctx context.Context, method string, url string, body Body, headers ...http.Header) (*HTTPResponse[T], error) {
+	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
+		value, found, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
+		if err != nil {
+			return nil, fmt.Errorf("getting cached response: %w", err)
+		}
+		if found && !value.Revalidate() {
+			return value, nil
+		}
+	}
+
+	request, err := r.newRequest(ctx, method, url, body, headers...)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	response, doErr := r.client.Do(request)
 	if doErr != nil {
-		return HTTPResponse[T]{}, fmt.Errorf("network error: %w", doErr)
+		return nil, fmt.Errorf("network error: %w", doErr)
 	}
 	if response == nil {
-		return HTTPResponse[T]{}, fmt.Errorf("network error: nil response")
+		return nil, fmt.Errorf("network error: nil response")
 	}
 
 	bodyBytes, readErr := io.ReadAll(response.Body)
 	closeErr := response.Body.Close()
 
 	if readErr != nil {
-		return HTTPResponse[T]{}, fmt.Errorf("reading response body: %w", readErr)
+		return nil, fmt.Errorf("reading response body: %w", readErr)
 	}
 	if closeErr != nil {
-		return HTTPResponse[T]{}, fmt.Errorf("closing response body: %w", closeErr)
+		return nil, fmt.Errorf("closing response body: %w", closeErr)
 	}
 
 	// Prefer the Accept header (caller intent) for codec selection — this lets
@@ -254,12 +236,9 @@ func (r *HTTPClient) doRequest[T any](
 		codec:     codec,
 	}
 
-	if response.StatusCode >= http.StatusOK &&
-		response.StatusCode < http.StatusMultipleChoices {
-		if len(bodyBytes) > 0 {
-			if unmarshalErr := codec.Unmarshal(bodyBytes, &httpResponse.data); unmarshalErr != nil {
-				return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
-			}
+	if httpResponse.IsSuccess() && len(bodyBytes) > 0 {
+		if unmarshalErr := codec.Unmarshal(bodyBytes, &httpResponse.data); unmarshalErr != nil {
+			return nil, fmt.Errorf("deserializing response: %w", unmarshalErr)
 		}
 	}
 
@@ -274,7 +253,7 @@ func (r *HTTPClient) doRequest[T any](
 		}
 	}
 
-	return httpResponse, nil
+	return &httpResponse, nil
 }
 
 func (r *HTTPClient) cacheEnabled() bool {

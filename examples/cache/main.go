@@ -54,7 +54,8 @@ func main() {
 
 	// err only represents network-level errors (connection refused, timeout, etc.)
 	response, err = httpClient.Get[UserResponse](context.Background(), server.URL, http.Header{
-		"X-Request-Id": []string{"abc-123"},
+		"X-Request-Id": []string{"abc-123", "abc-124"},
+		"X-Custom":     []string{"xyz"},
 	})
 	if err != nil {
 		log.Fatalf("network error: %v", err)
