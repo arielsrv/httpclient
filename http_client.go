@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"slices"
 	"time"
+
+	"go.etcd.io/etcd/client/pkg/v3/types"
 )
 
 // DefaultTimeout bounds the whole request (dial + body read) unless overridden.
@@ -15,7 +18,12 @@ import (
 const DefaultTimeout = 30 * time.Second
 
 type HTTPClient struct {
-	lowLevelClient http.Client
+	httpKeyGenerator HTTPKeyGenerator
+	cacheableMethods types.Set
+	kvs              *KVS
+	pool             *Pool
+	lowLevelClient   http.Client
+	concurrencyLevel int
 }
 
 type ClientOption func(*HTTPClient)
@@ -35,14 +43,23 @@ func WithTransport(rt http.RoundTripper) ClientOption {
 
 // WithTimeout bounds the whole request (dial + body read). Overrides DefaultTimeout.
 // Pass 0 to disable the client-level timeout and rely only on the context deadline.
-func WithTimeout(d time.Duration) ClientOption {
+func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *HTTPClient) {
-		c.lowLevelClient.Timeout = d
+		c.lowLevelClient.Timeout = timeout
+	}
+}
+
+func WithCache(cache Cache, concurrencyLevel int) ClientOption {
+	return func(c *HTTPClient) {
+		c.kvs = &KVS{
+			cache: cache,
+		}
+		c.concurrencyLevel = concurrencyLevel
 	}
 }
 
 // WithFollowRedirects controls whether the client follows HTTP redirects (3xx).
-// By default the standard library follows up to 10 redirects automatically.
+// By default, the standard library follows up to 10 redirects automatically.
 // Pass false to disable redirect following entirely — the first 3xx response is
 // returned as-is so the caller can inspect Location and decide what to do.
 func WithFollowRedirects(follow bool) ClientOption {
@@ -63,6 +80,13 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 			Transport: NewConnectionPool().transport,
 			Timeout:   DefaultTimeout,
 		},
+		httpKeyGenerator: defaultCacheKeyGenerator{},
+		pool:             &Pool{ConcurrencyLevel: runtime.NumCPU() - 1},
+		cacheableMethods: types.NewUnsafeSet(
+			http.MethodGet,
+			http.MethodHead,
+			http.MethodOptions,
+		),
 	}
 	for opt := range slices.Values(opts) {
 		opt(httpClient)
@@ -161,6 +185,16 @@ func (r *HTTPClient) doRequest[T any](
 	body Body,
 	headers ...http.Header,
 ) (HTTPResponse[T], error) {
+	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
+		value, found, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
+		if err != nil {
+			return HTTPResponse[T]{}, fmt.Errorf("getting cached response: %w", err)
+		}
+		if found && !value.Revalidate() {
+			return *value, nil
+		}
+	}
+
 	if body.err != nil {
 		return HTTPResponse[T]{}, fmt.Errorf("encoding request body: %w", body.err)
 	}
@@ -214,18 +248,43 @@ func (r *HTTPClient) doRequest[T any](
 		codec = codecForContentType(response.Header.Get("Content-Type"))
 	}
 
-	result := HTTPResponse[T]{
-		statusCode: response.StatusCode,
-		body:       bodyBytes,
-		headers:    response.Header,
-		codec:      codec,
+	httpResponse := HTTPResponse[T]{
+		raw:       response,
+		bodyBytes: bodyBytes,
+		codec:     codec,
 	}
 
-	if result.IsSuccess() && len(bodyBytes) > 0 {
-		if unmarshalErr := codec.Unmarshal(bodyBytes, &result.data); unmarshalErr != nil {
-			return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
+	if response.StatusCode >= http.StatusOK &&
+		response.StatusCode < http.StatusMultipleChoices {
+		if len(bodyBytes) > 0 {
+			if unmarshalErr := codec.Unmarshal(bodyBytes, &httpResponse.data); unmarshalErr != nil {
+				return HTTPResponse[T]{}, fmt.Errorf("deserializing response: %w", unmarshalErr)
+			}
 		}
 	}
 
-	return result, nil
+	if r.cacheableMethods.Contains(request.Method) && r.cacheEnabled() {
+		if ttl, cacheable := httpResponse.Cacheable(); cacheable {
+			r.pool.submit(func() {
+				err = r.kvs.Set(ctx, request.URL.String(), httpResponse, ttl)
+				if err != nil {
+					return
+				}
+			})
+		}
+	}
+
+	return httpResponse, nil
+}
+
+func (r *HTTPClient) cacheEnabled() bool {
+	return r.kvs != nil
+}
+
+type Pool struct {
+	ConcurrencyLevel int
+}
+
+func (r *Pool) submit(f func()) {
+	f()
 }

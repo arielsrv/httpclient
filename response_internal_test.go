@@ -8,7 +8,7 @@ import "testing"
 // white-box test since it can set the unexported fields.
 func TestAs_NilCodecFallsBackToJSON(t *testing.T) {
 	t.Parallel()
-	resp := HTTPResponse[any]{body: []byte(`{"x":1}`), codec: nil}
+	resp := HTTPResponse[any]{bodyBytes: []byte(`{"x":1}`), codec: nil}
 
 	out, err := resp.As[map[string]int]()
 	if err != nil {
