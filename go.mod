@@ -3,9 +3,9 @@ module github.com/arielsrv/httpclient
 go 1.27
 
 require (
+	github.com/emirpasic/gods v1.18.1
 	github.com/go-playground/form/v4 v4.3.0
 	github.com/stretchr/testify v1.11.1
-	go.etcd.io/etcd/client/pkg/v3 v3.5.4
 )
 
 replace github.com/arielsrv/go-kvs-client v0.0.0 => ../../projects/personal/go-kvs-client
@@ -243,9 +243,9 @@ require (
 	go-simpler.org/sloglint v0.12.0 // indirect
 	go.augendre.info/arangolint v0.4.0 // indirect
 	go.augendre.info/fatcontext v0.9.0 // indirect
-	go.uber.org/multierr v1.10.0 // indirect
-	go.uber.org/nilaway v0.0.0-20260730225925-3e5f45c73e85 // indirect
-	go.uber.org/zap v1.27.0 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/nilaway v0.0.0-20260803001828-dc48a6814e08 // indirect
+	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect

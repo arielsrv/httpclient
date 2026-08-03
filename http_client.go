@@ -10,7 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"go.etcd.io/etcd/client/pkg/v3/types"
+	"github.com/emirpasic/gods/sets/hashset"
 )
 
 // DefaultTimeout bounds the whole request (dial + body read) unless overridden.
@@ -19,9 +19,9 @@ const DefaultTimeout = 30 * time.Second
 
 type HTTPClient struct {
 	httpKeyGenerator HTTPKeyGenerator
-	cacheableMethods types.Set
 	kvs              *KVS
 	pool             *Pool
+	cacheableMethods *hashset.Set
 	lowLevelClient   http.Client
 	concurrencyLevel int
 }
@@ -34,7 +34,7 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 		},
 		httpKeyGenerator: defaultCacheKeyGenerator{},
 		pool:             &Pool{ConcurrencyLevel: runtime.NumCPU() - 1},
-		cacheableMethods: types.NewUnsafeSet(
+		cacheableMethods: hashset.New(
 			http.MethodGet,
 			http.MethodHead,
 			http.MethodOptions,
