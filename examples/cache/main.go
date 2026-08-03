@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,22 +13,30 @@ import (
 )
 
 type UserResponse struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+	Header string
 }
 
 func main() {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": 1,
-			"name": "John Doe",
-			"email": "john@doe.com"
-		}`))
+		bytes, err := json.Marshal(UserResponse{
+			ID:     1,
+			Name:   "John Doe",
+			Email:  "john@doe.com",
+			Header: r.Header.Get("X-Request-Id"),
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		w.Write(bytes)
 	}))
+	server.EnableHTTP2 = true
 	defer server.Close()
+
 	httpClient := httpclient.NewHTTPClient(httpclient.
 		WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
 			ByteSize: 1024,
@@ -50,7 +59,7 @@ func main() {
 
 	// Data() returns the deserialized response body
 	user := response.Data()
-	fmt.Printf("  [%d] %s <%s>\n", user.ID, user.Name, user.Email)
+	fmt.Printf("  [%d] %s <%s> <%s>\n", user.ID, user.Name, user.Email, user.Header)
 
 	// err only represents network-level errors (connection refused, timeout, etc.)
 	response, err = httpClient.Get[UserResponse](context.Background(), server.URL, http.Header{
@@ -68,5 +77,5 @@ func main() {
 
 	// Data() returns the deserialized response body
 	user = response.Data()
-	fmt.Printf("  [%d] %s <%s>\n", user.ID, user.Name, user.Email)
+	fmt.Printf("  [%d] %s <%s> <%s>\n", user.ID, user.Name, user.Email, user.Header)
 }

@@ -12,25 +12,25 @@ type KVS struct {
 }
 
 func (r *KVS) Set[T any](ctx context.Context, key string, entry T, ttl ...time.Duration) error {
-	return r.cache.Set(key, entry, ttl...)
+	return r.cache.Set(ctx, key, entry, ttl...)
 }
 
-func (r *KVS) Get[T any](ctx context.Context, key string) (*T, bool, error) {
-	result, found, err := r.cache.Get(key)
+func (r *KVS) Get[T any](ctx context.Context, key string) (*T, error) {
+	result, found, err := r.cache.Get(ctx, key)
 	if err != nil {
-		return new(T), false, err
+		return new(T), err
 	}
 
 	if !found {
-		return new(T), false, nil
+		return new(T), nil
 	}
 
 	value, ok := result.(T)
 	if !ok {
-		return new(T), false, errors.New("value is not HTTPResponse")
+		return new(T), errors.New("value is not HTTPResponse")
 	}
 
-	return &value, found, nil
+	return &value, nil
 }
 
 type HTTPKeyGenerator interface {
@@ -52,8 +52,8 @@ func (r CacheEntry) Revalidate() bool {
 }
 
 type Cache interface {
-	Set(key string, value any, ttl ...time.Duration) error
-	Get(key string) (any, bool, error)
+	Set(ctx context.Context, key string, value any, ttl ...time.Duration) error
+	Get(ctx context.Context, key string) (any, bool, error)
 }
 
 type InMemoryClientCache struct {
@@ -68,12 +68,17 @@ func NewInMemoryClientCache(config InMemoryConfig) *InMemoryClientCache {
 	}
 }
 
-func (r InMemoryClientCache) Set(key string, value any, ttl ...time.Duration) error {
+func (r InMemoryClientCache) Set(
+	ctx context.Context,
+	key string,
+	value any,
+	ttl ...time.Duration,
+) error {
 	r.m[key] = value
 	return nil
 }
 
-func (r InMemoryClientCache) Get(key string) (any, bool, error) {
+func (r InMemoryClientCache) Get(ctx context.Context, key string) (any, bool, error) {
 	value, found := r.m[key]
 	return value, found, nil
 }

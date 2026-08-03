@@ -9,14 +9,14 @@ type ClientOption func(*HTTPClient)
 
 func WithConnectionPool(pool *ConnectionPool) ClientOption {
 	return func(c *HTTPClient) {
-		c.client.Transport = pool.transport
+		c.lowLevelClient.Transport = pool.transport
 	}
 }
 
 // WithTransport sets a custom RoundTripper. Useful for testing and advanced use cases.
 func WithTransport(rt http.RoundTripper) ClientOption {
 	return func(c *HTTPClient) {
-		c.client.Transport = rt
+		c.lowLevelClient.Transport = rt
 	}
 }
 
@@ -24,7 +24,7 @@ func WithTransport(rt http.RoundTripper) ClientOption {
 // Pass 0 to disable the client-level timeout and rely only on the context deadline.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *HTTPClient) {
-		c.client.Timeout = timeout
+		c.lowLevelClient.Timeout = timeout
 	}
 }
 
@@ -44,11 +44,11 @@ func WithCache(cache Cache, concurrencyLevel int) ClientOption {
 func WithFollowRedirects(follow bool) ClientOption {
 	return func(c *HTTPClient) {
 		if !follow {
-			c.client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			c.lowLevelClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 				return http.ErrUseLastResponse
 			}
 		} else {
-			c.client.CheckRedirect = nil // restore default
+			c.lowLevelClient.CheckRedirect = nil // restore default
 		}
 	}
 }

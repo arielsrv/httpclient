@@ -22,13 +22,13 @@ type HTTPClient struct {
 	cacheableMethods types.Set
 	kvs              *KVS
 	pool             *Pool
-	client           http.Client
+	lowLevelClient   http.Client
 	concurrencyLevel int
 }
 
 func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	httpClient := &HTTPClient{
-		client: http.Client{
+		lowLevelClient: http.Client{
 			Transport: NewConnectionPool().transport,
 			Timeout:   DefaultTimeout,
 		},
@@ -178,11 +178,11 @@ func (r *HTTPClient) doRequest[T any](
 	headers ...http.Header,
 ) (*HTTPResponse[T], error) {
 	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
-		value, found, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
+		value, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
 		if err != nil {
 			return nil, fmt.Errorf("getting cached response: %w", err)
 		}
-		if found && !value.Revalidate() {
+		if !value.Revalidate() {
 			return value, nil
 		}
 	}
@@ -192,7 +192,7 @@ func (r *HTTPClient) doRequest[T any](
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	response, doErr := r.client.Do(request)
+	response, doErr := r.lowLevelClient.Do(request)
 	if doErr != nil {
 		return nil, fmt.Errorf("network error: %w", doErr)
 	}
