@@ -1,15 +1,25 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
+# Dependabot configuration.
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
-    schedule:
-      interval: daily
+  # Go module updates are paused: the updater runs in Dependabot's own image
+  # with its own Go toolchain, which cannot be pinned from here, and it fails on
+  # the `go 1.27` directive in go.mod while 1.27 is unreleased. Re-enable this
+  # block once Go 1.27 ships. Until then, `task upgrade` (go-mod-upgrade) does
+  # the same job locally.
+  # - package-ecosystem: gomod
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   groups:
+  #     go-modules:
+  #       patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]

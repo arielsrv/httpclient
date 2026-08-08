@@ -303,3 +303,9 @@ pull request:
 | `vuln` | `govulncheck` |
 
 Coverage output is uploaded as a build artifact.
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) runs CodeQL on the
+Go and Actions code on push, pull request and weekly.
+
+Both workflows pin the Go toolchain in a single `GO_VERSION` variable, because
+go.mod requires 1.27 (generic methods) and there is no stable 1.27 release yet
+for `setup-go` to resolve. Update both when it ships.
