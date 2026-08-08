@@ -1,7 +1,7 @@
 package httpclient
 
 type futureResult[T any] struct {
-	response HTTPResponse[T]
+	response *HTTPResponse[T]
 	err      error
 }
 
@@ -12,13 +12,13 @@ type Future[T any] struct {
 }
 
 // Await blocks until the request completes and returns the response and error.
-func (r *Future[T]) Await() (HTTPResponse[T], error) {
+func (r *Future[T]) Await() (*HTTPResponse[T], error) {
 	fResult := <-r.ch
 	return fResult.response, fResult.err
 }
 
 // async runs fn in a goroutine and returns a Future that resolves with its result.
-func async[T any](fn func() (HTTPResponse[T], error)) *Future[T] {
+func async[T any](fn func() (*HTTPResponse[T], error)) *Future[T] {
 	ch := make(chan futureResult[T], 1)
 	go func() {
 		resp, err := fn()

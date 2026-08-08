@@ -94,8 +94,8 @@ func codecForContentType(header string) Codec {
 	if err != nil {
 		return defaultCodec
 	}
-	if c, ok := codecRegistry[mediaType]; ok {
-		return c
+	if codec, ok := codecRegistry[mediaType]; ok {
+		return codec
 	}
 	// Structured syntax suffixes (RFC 6839): application/problem+json,
 	// application/vnd.api+json, application/problem+xml, etc.

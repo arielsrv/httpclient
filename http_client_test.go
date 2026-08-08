@@ -1,6 +1,7 @@
 package httpclient_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -9,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +43,12 @@ type capturedRequest struct {
 
 // echoServer captures the incoming request and replies with the given status,
 // optionally writing rawBody with contentType.
-func echoServer(t *testing.T, status int, contentType string, rawBody []byte) (*httptest.Server, *capturedRequest) {
+func echoServer(
+	t *testing.T,
+	status int,
+	contentType string,
+	rawBody []byte,
+) (*httptest.Server, *capturedRequest) {
 	t.Helper()
 	captured := &capturedRequest{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +179,11 @@ func TestHTTPResponse_DataNotDeserializedOnNonSuccess(t *testing.T) {
 
 func TestHTTPResponse_BodyOnNonSuccess(t *testing.T) {
 	t.Parallel()
-	server := newTestServer(http.StatusUnauthorized, map[string]string{"message": "unauthorized"}, nil)
+	server := newTestServer(
+		http.StatusUnauthorized,
+		map[string]string{"message": "unauthorized"},
+		nil,
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL)
@@ -238,7 +250,12 @@ func TestHTTPResponse_As_InvalidJSON(t *testing.T) {
 
 func TestPost_JSONBody(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Alice"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":1,"name":"Alice"}`),
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Post[testUser](
@@ -384,7 +401,12 @@ func TestPost_EncodeError(t *testing.T) {
 
 func TestPut_SendsBodyAndMethod(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusOK, "application/json", []byte(`{"id":2,"name":"Dave"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusOK,
+		"application/json",
+		[]byte(`{"id":2,"name":"Dave"}`),
+	)
 	defer server.Close()
 
 	resp, err := httpclient.NewHTTPClient().Put[testUser](
@@ -425,7 +447,12 @@ func TestDelete_NoBody(t *testing.T) {
 
 func TestPostAsync_Await(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":5,"name":"Grace"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":5,"name":"Grace"}`),
+	)
 	defer server.Close()
 
 	future := httpclient.NewHTTPClient().PostAsync[testUser](
@@ -587,7 +614,10 @@ func TestNewHTTPClient_WithCustomPool(t *testing.T) {
 
 func TestHTTPClient_Get_NetworkError(t *testing.T) {
 	t.Parallel()
-	_, err := httpclient.NewHTTPClient().Get[any](context.Background(), "http://localhost:0/invalid")
+	_, err := httpclient.NewHTTPClient().Get[any](
+		context.Background(),
+		"http://localhost:0/invalid",
+	)
 	assert.Error(t, err)
 }
 
@@ -631,7 +661,10 @@ func TestGetAsync_Await(t *testing.T) {
 	server := newTestServer(http.StatusOK, user, nil)
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().GetAsync[testUser](context.Background(), server.URL).Await()
+	resp, err := httpclient.NewHTTPClient().GetAsync[testUser](
+		context.Background(),
+		server.URL,
+	).Await()
 	require.NoError(t, err)
 	assert.True(t, resp.IsSuccess())
 	assert.Equal(t, 42, resp.Data().ID)
@@ -876,7 +909,11 @@ func TestGet_AcceptJSON_ForcesCodingViaAcceptHeader(t *testing.T) {
 	server, _ := echoServer(t, http.StatusOK, "application/json", mustMarshalJSON(t, user))
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().Get[testUser](context.Background(), server.URL, httpclient.AcceptJSON())
+	resp, err := httpclient.NewHTTPClient().Get[testUser](
+		context.Background(),
+		server.URL,
+		httpclient.AcceptJSON(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, user.Name, resp.Data().Name)
 }
@@ -890,7 +927,11 @@ func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
 	server, _ := echoServer(t, http.StatusOK, "application/xml", body)
 	defer server.Close()
 
-	resp, err := httpclient.NewHTTPClient().Get[xmlUser](context.Background(), server.URL, httpclient.AcceptXML())
+	resp, err := httpclient.NewHTTPClient().Get[xmlUser](
+		context.Background(),
+		server.URL,
+		httpclient.AcceptXML(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "Ivar", resp.Data().Name)
 }
@@ -900,7 +941,12 @@ func TestGet_AcceptXML_ForcesCodingViaAcceptHeader(t *testing.T) {
 // body.contentType != "" && request.Header.Get("Content-Type") == "" branch in doRequest.
 func TestPost_DefaultJSON_WhenNoContentTypeHeader(t *testing.T) {
 	t.Parallel()
-	server, captured := echoServer(t, http.StatusCreated, "application/json", []byte(`{"id":1,"name":"Jan"}`))
+	server, captured := echoServer(
+		t,
+		http.StatusCreated,
+		"application/json",
+		[]byte(`{"id":1,"name":"Jan"}`),
+	)
 	defer server.Close()
 
 	// No explicit Content-Type header — bodyFromHeaders defaults to JSON.
@@ -1019,4 +1065,705 @@ func mustMarshalJSON(t *testing.T, v any) []byte {
 	data, err := json.Marshal(v)
 	require.NoError(t, err)
 	return data
+}
+
+// --- Cache ---
+
+// countingServer replies with body plus the given headers, and records how many
+// requests actually reached it.
+func countingServer(hits *atomic.Int64, body any, headers map[string]string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		for k, v := range headers {
+			w.Header().Set(k, v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			panic(err)
+		}
+	}))
+}
+
+// inMemoryCache builds a fresh Ristretto-backed cache for a test.
+func inMemoryCache(t *testing.T, byteSize int64) *httpclient.InMemoryClientCache {
+	t.Helper()
+	cache, err := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: byteSize})
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+	return cache
+}
+
+// cachingClient builds a client backed by a fresh in-memory cache.
+func cachingClient(t *testing.T, opts ...httpclient.ClientOption) *httpclient.HTTPClient {
+	t.Helper()
+	all := append([]httpclient.ClientOption{
+		httpclient.WithCache(inMemoryCache(t, 1<<20), 2),
+	}, opts...)
+	client := httpclient.NewHTTPClient(all...)
+	t.Cleanup(client.Close)
+	return client
+}
+
+// TestCache_ReadYourWrites verifies that a GET issued right after a cacheable one
+// sees the entry even though the write is handed to the background pool — the
+// second request must not reach the server.
+func TestCache_ReadYourWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 7, Name: "Dave"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t)
+
+	first, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.True(t, first.IsSuccess())
+
+	second, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Dave", second.Data().Name)
+	assert.Equal(t, int64(1), hits.Load(), "second GET should be served from cache")
+}
+
+// fixedKeyGenerator maps every request to the same key, so a test can look the
+// entry up in the backing store without reproducing the real key derivation.
+type fixedKeyGenerator struct{ key string }
+
+func (r fixedKeyGenerator) Generate(_, _ string, _ ...http.Header) string { return r.key }
+
+// TestCache_CloseFlushesPendingWrites verifies Close waits for queued writes.
+func TestCache_CloseFlushesPendingWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 9, Name: "Frank"}, nil)
+	defer server.Close()
+
+	cache := inMemoryCache(t, 1<<20)
+	client := httpclient.NewHTTPClient(
+		httpclient.WithCache(cache, 2),
+		httpclient.WithCacheKeyGenerator(fixedKeyGenerator{key: "frank"}),
+	)
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	client.Close()
+
+	_, found, err := cache.Get(context.Background(), "frank")
+	require.NoError(t, err)
+	assert.True(t, found, "the queued write should have landed before Close returned")
+}
+
+func TestCache_HonorsCacheControl(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		cacheControl string
+		wantHits     int64
+	}{
+		{name: "max-age caches", cacheControl: "max-age=60", wantHits: 1},
+		{name: "public max-age caches", cacheControl: "public, max-age=60", wantHits: 1},
+		{name: "no-store skips the cache", cacheControl: "no-store", wantHits: 2},
+		{name: "max-age=0 skips the cache", cacheControl: "max-age=0", wantHits: 2},
+		{name: "no-cache forces revalidation", cacheControl: "no-cache", wantHits: 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var hits atomic.Int64
+			server := countingServer(&hits, testUser{ID: 1, Name: "Gina"}, map[string]string{
+				"Cache-Control": tc.cacheControl,
+			})
+			defer server.Close()
+
+			client := cachingClient(t)
+			for range 2 {
+				resp, err := client.Get[testUser](context.Background(), server.URL)
+				require.NoError(t, err)
+				assert.Equal(t, "Gina", resp.Data().Name)
+			}
+
+			assert.Equal(t, tc.wantHits, hits.Load())
+		})
+	}
+}
+
+// TestCache_ExpiresHeader covers the Expires fallback when Cache-Control is absent.
+func TestCache_ExpiresHeader(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		expires  time.Time
+		wantHits int64
+	}{
+		{name: "future Expires caches", expires: time.Now().Add(time.Hour), wantHits: 1},
+		{
+			name:     "past Expires falls back to the default TTL",
+			expires:  time.Now().Add(-time.Hour),
+			wantHits: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var hits atomic.Int64
+			server := countingServer(&hits, testUser{ID: 2, Name: "Hugo"}, map[string]string{
+				"Expires": tc.expires.UTC().Format(http.TimeFormat),
+			})
+			defer server.Close()
+
+			client := cachingClient(t)
+			for range 2 {
+				_, err := client.Get[testUser](context.Background(), server.URL)
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.wantHits, hits.Load())
+		})
+	}
+}
+
+// TestCache_DefaultTTLDisabled verifies WithDefaultCacheTTL(0) restricts caching
+// to responses the server explicitly marks as cacheable.
+func TestCache_DefaultTTLDisabled(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 3, Name: "Iris"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithDefaultCacheTTL(0))
+	for range 2 {
+		_, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load(), "no Cache-Control and no default TTL means no caching")
+}
+
+// TestCache_EntryExpires verifies the stored TTL is enforced: once it elapses the
+// entry is gone and the request goes back to the origin.
+func TestCache_EntryExpires(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 4, Name: "Jack"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithDefaultCacheTTL(30*time.Millisecond))
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	_, err = client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), hits.Load(), "still fresh")
+
+	time.Sleep(60 * time.Millisecond)
+
+	_, err = client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), hits.Load(), "expired entry must be refetched")
+}
+
+// TestCache_ErrorResponsesAreNotCached verifies non-2xx responses never land in
+// the cache, whatever the server advertises.
+func TestCache_ErrorResponsesAreNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		resp, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.False(t, resp.IsSuccess())
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
+}
+
+// TestCache_PostIsNotCached verifies only safe methods hit the cache.
+func TestCache_PostIsNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 5, Name: "Kim"}, map[string]string{
+		"Cache-Control": "max-age=60",
+	})
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		_, err := client.Post[testUser](context.Background(), server.URL, testUser{ID: 5})
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
+}
+
+// TestRace_ConcurrentCacheWrites hammers a cached endpoint from many goroutines
+// so the race detector can catch unsynchronized access to the cache.
+func TestRace_ConcurrentCacheWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 8, Name: "Erin"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t)
+
+	var wg sync.WaitGroup
+	wg.Add(20)
+
+	for range 20 {
+		go func() {
+			defer wg.Done()
+			resp, err := client.Get[testUser](context.Background(), server.URL)
+			require.NoError(t, err)
+			assert.Equal(t, "Erin", resp.Data().Name)
+		}()
+	}
+
+	wg.Wait()
+}
+
+// TestInMemoryCache_TTL exercises the store directly: a positive TTL expires, no
+// TTL keeps the entry.
+func TestInMemoryCache_TTL(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	cache := inMemoryCache(t, 1<<20)
+
+	require.NoError(t, cache.Set(ctx, "sticky", []byte("v")))
+	require.NoError(t, cache.Set(ctx, "brief", []byte("v"), 20*time.Millisecond))
+
+	value, found, err := cache.Get(ctx, "brief")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, []byte("v"), value)
+
+	time.Sleep(80 * time.Millisecond)
+
+	_, found, err = cache.Get(ctx, "brief")
+	require.NoError(t, err)
+	assert.False(t, found, "entry should have expired")
+
+	_, found, err = cache.Get(ctx, "sticky")
+	require.NoError(t, err)
+	assert.True(t, found, "entry without TTL should survive")
+}
+
+// TestInMemoryCache_MissIsNotAnError verifies the contract every backend must
+// honor: an absent key is a miss, not a failure.
+func TestInMemoryCache_MissIsNotAnError(t *testing.T) {
+	t.Parallel()
+	value, found, err := inMemoryCache(t, 1<<20).Get(context.Background(), "absent")
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Nil(t, value)
+}
+
+// TestInMemoryCache_EvictsByByteSize verifies ByteSize is a real budget: writing
+// far more than it allows must not grow the cache without bound.
+func TestInMemoryCache_EvictsByByteSize(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		budget    = 8 << 10 // 8 KiB
+		entrySize = 1 << 10 // 1 KiB
+		entries   = 200     // 200 KiB written in total
+	)
+	cache := inMemoryCache(t, budget)
+	payload := bytes.Repeat([]byte("x"), entrySize)
+
+	for i := range entries {
+		require.NoError(t, cache.Set(ctx, strconv.Itoa(i), payload))
+	}
+
+	kept := 0
+	for i := range entries {
+		if _, found, err := cache.Get(ctx, strconv.Itoa(i)); err == nil && found {
+			kept++
+		}
+	}
+
+	assert.NotZero(t, kept, "the cache should still hold something")
+	assert.LessOrEqual(t, kept, budget/entrySize,
+		"a %d-byte budget cannot hold %d entries of %d bytes", budget, kept, entrySize)
+}
+
+// blockingCache holds every Set until release is closed, so tests can pin a cache
+// write in flight and observe what readers do meanwhile.
+type blockingCache struct {
+	release chan struct{}
+	entered chan struct{}
+}
+
+func newBlockingCache() *blockingCache {
+	return &blockingCache{
+		release: make(chan struct{}),
+		entered: make(chan struct{}, 1),
+	}
+}
+
+func (r *blockingCache) Set(
+	ctx context.Context,
+	key string,
+	value []byte,
+	ttl ...time.Duration,
+) error {
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	<-r.release
+	return nil
+}
+
+func (r *blockingCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+// TestCache_AwaitPendingWriteRespectsContext verifies that waiting for an in-flight
+// cache write is bounded by the caller's context: a stalled cache must not hang
+// the next request.
+func TestCache_AwaitPendingWriteRespectsContext(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 11, Name: "Lena"}, nil)
+	defer server.Close()
+
+	cache := newBlockingCache()
+	client := httpclient.NewHTTPClient(httpclient.WithCache(cache, 2))
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	<-cache.entered // the write is now parked inside Set
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.Get[testUser](ctx, server.URL)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stalled cache write blocked the next request")
+	}
+
+	close(cache.release)
+	client.Close()
+}
+
+// TestCache_GetAfterCloseDoesNotHang verifies that requests still work once the
+// pool is stopped: the write cannot be queued, and no reader waits on it.
+func TestCache_GetAfterCloseDoesNotHang(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 12, Name: "Mona"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t)
+	client.Close()
+
+	for range 2 {
+		resp, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, "Mona", resp.Data().Name)
+	}
+
+	assert.Equal(t, int64(2), hits.Load(), "a stopped pool cannot populate the cache")
+}
+
+// --- Cache key ---
+
+// TestCache_KeyIsolatesAuthorization is the one that matters for correctness:
+// two callers hitting the same URL with different credentials must never see
+// each other's response.
+func TestCache_KeyIsolatesAuthorization(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "max-age=60")
+		// The origin answers with whoever is asking.
+		if err := json.NewEncoder(w).Encode(testUser{
+			ID:   1,
+			Name: r.Header.Get("Authorization"),
+		}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	alice := http.Header{"Authorization": []string{"Bearer alice"}}
+	bob := http.Header{"Authorization": []string{"Bearer bob"}}
+
+	first, err := client.Get[testUser](ctx, server.URL, alice)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer alice", first.Data().Name)
+
+	second, err := client.Get[testUser](ctx, server.URL, bob)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer bob", second.Data().Name, "bob must not be served alice's response")
+	assert.Equal(t, int64(2), hits.Load(), "a different identity is a different key")
+
+	// Alice asking again is still a hit on her own entry.
+	third, err := client.Get[testUser](ctx, server.URL, alice)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer alice", third.Data().Name)
+	assert.Equal(t, int64(2), hits.Load())
+}
+
+// TestCache_KeyIsolatesAcceptHeader verifies content negotiation is part of the
+// key: an XML and a JSON caller must not collide.
+func TestCache_KeyIsolatesAcceptHeader(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Cache-Control", "max-age=60")
+		if r.Header.Get("Accept") == "application/xml" {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<user><name>Rita</name><id>2</id></user>`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 2, Name: "Rita"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	jsonResp, err := client.Get[testUser](ctx, server.URL, httpclient.AcceptJSON())
+	require.NoError(t, err)
+	require.Equal(t, "Rita", jsonResp.Data().Name)
+
+	xmlResp, err := client.Get[xmlUser](ctx, server.URL, httpclient.AcceptXML())
+	require.NoError(t, err)
+	assert.Equal(t, "Rita", xmlResp.Data().Name)
+	assert.Equal(t, int64(2), hits.Load(), "a different Accept is a different key")
+}
+
+// TestCache_KeyDoesNotLeakCredentials verifies the derived key cannot be mined
+// for the token it varies on.
+func TestCache_KeyDoesNotLeakCredentials(t *testing.T) {
+	t.Parallel()
+	const secret = "Bearer super-secret-token"
+	var stored []string
+	recorder := &keyRecordingCache{keys: &stored}
+
+	server := countingServer(new(atomic.Int64), testUser{ID: 1, Name: "Sam"},
+		map[string]string{"Cache-Control": "max-age=60"})
+	defer server.Close()
+
+	client := httpclient.NewHTTPClient(httpclient.WithCache(recorder, 1))
+	_, err := client.Get[testUser](context.Background(), server.URL,
+		http.Header{"Authorization": []string{secret}})
+	require.NoError(t, err)
+	client.Close()
+
+	require.NotEmpty(t, stored)
+	for _, key := range stored {
+		assert.NotContains(t, key, secret)
+		assert.NotContains(t, key, "super-secret-token")
+	}
+}
+
+// keyRecordingCache records every key written to it and stores nothing.
+type keyRecordingCache struct {
+	keys *[]string
+	mu   sync.Mutex
+}
+
+func (r *keyRecordingCache) Set(_ context.Context, key string, _ []byte, _ ...time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	*r.keys = append(*r.keys, key)
+	return nil
+}
+
+func (r *keyRecordingCache) Get(_ context.Context, _ string) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+// --- Conditional revalidation ---
+
+// etagServer answers with the given ETag, replying 304 when the client already
+// has it. It records how many full bodies it had to send.
+func etagServer(etag string, bodies *atomic.Int64, requests *atomic.Int64) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "max-age=1")
+
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		bodies.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 3, Name: "Tess"}); err != nil {
+			panic(err)
+		}
+	}))
+}
+
+// TestCache_RevalidatesWithETag verifies a stale entry is confirmed with a
+// conditional request: the origin is contacted, but no body crosses the wire and
+// the caller still gets decoded data.
+func TestCache_RevalidatesWithETag(t *testing.T) {
+	t.Parallel()
+	var bodies, requests atomic.Int64
+	server := etagServer(`"v1"`, &bodies, &requests)
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	first, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	require.Equal(t, "Tess", first.Data().Name)
+	require.Equal(t, int64(1), bodies.Load())
+
+	// max-age=1, so the entry goes stale but stays around to be revalidated.
+	time.Sleep(1100 * time.Millisecond)
+
+	second, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Tess", second.Data().Name, "a 304 must still yield decoded data")
+	assert.Equal(t, http.StatusOK, second.StatusCode(), "the stored 200 is what is served")
+	assert.Equal(t, int64(2), requests.Load(), "the origin was contacted")
+	assert.Equal(t, int64(1), bodies.Load(), "but it did not resend the body")
+
+	// The 304 refreshed the entry, so the next call is a plain hit again.
+	third, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Tess", third.Data().Name)
+	assert.Equal(t, int64(2), requests.Load(), "refreshed entry serves without the origin")
+}
+
+// TestCache_RevalidatesWithLastModified covers the other validator.
+func TestCache_RevalidatesWithLastModified(t *testing.T) {
+	t.Parallel()
+	modified := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+	var bodies, requests atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Last-Modified", modified)
+		w.Header().Set("Cache-Control", "max-age=1")
+
+		if r.Header.Get("If-Modified-Since") == modified {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		bodies.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 4, Name: "Ugo"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	second, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Ugo", second.Data().Name)
+	assert.Equal(t, int64(1), bodies.Load(), "the body should not have been resent")
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+// TestCache_RevalidationWindowZeroDisablesConditionalRequests verifies stale
+// entries are dropped rather than kept for revalidation when the window is off.
+func TestCache_RevalidationWindowZeroDisablesConditionalRequests(t *testing.T) {
+	t.Parallel()
+	var bodies, requests atomic.Int64
+	server := etagServer(`"v1"`, &bodies, &requests)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithCacheRevalidationWindow(0))
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	_, err = client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), bodies.Load(), "without a window the body is refetched in full")
+}
+
+// TestCache_CallerValidatorsWin verifies an explicit conditional header from the
+// caller is not overwritten by the stored entry's validator.
+func TestCache_CallerValidatorsWin(t *testing.T) {
+	t.Parallel()
+	var received atomic.Value
+	received.Store("")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Store(r.Header.Get("If-None-Match"))
+		w.Header().Set("ETag", `"stored"`)
+		w.Header().Set("Cache-Control", "max-age=1")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 5, Name: "Vera"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	_, err = client.Get[testUser](ctx, server.URL,
+		http.Header{"If-None-Match": []string{`"caller"`}})
+	require.NoError(t, err)
+	assert.Equal(t, `"caller"`, received.Load(), "the caller's validator must be preserved")
+}
+
+// TestCache_VaryStarIsNotCached verifies a response that varies on something no
+// key can capture is never stored.
+func TestCache_VaryStarIsNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 6, Name: "Wes"}, map[string]string{
+		"Cache-Control": "max-age=60",
+		"Vary":          "*",
+	})
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		_, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
 }

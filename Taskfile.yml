@@ -14,23 +14,30 @@ tasks:
   lint:
     cmds:
       - cd examples
-      -   task: lint-tools
+      - task: lint-tools
       - cd ..
-      -   task: lint-tools
+      - task: lint-tools
   test:nil:
     cmds:
       - go tool nilaway ./...
+  # -short skips the container-backed cache tests: repeating them five times only
+  # pays for Docker startup, the races worth catching are in the client itself.
   test:race:
     cmds:
-      - go test -race -count 5 ./... -v
+      - go test -race -short -count 5 ./... -v
+  # Cache backends against real Redis and Memcached, via testcontainers.
+  # Needs a running Docker daemon; the tests skip themselves when there is none.
+  test:integration:
+    cmds:
+      - go test -count 1 -run 'Redis|Memcached' ./... -v
   test:mock:
     cmds:
       - go tool mockery --config .mockery.yml
   test:
     cmds:
-      -   task: test:mock
+      - task: test:mock
       - go test -v ./...
-      -   task: test:race
+      - task: test:race
   download:
     cmds:
       - go work sync
@@ -44,6 +51,6 @@ tasks:
       - go tool go-mod-upgrade
   default:
     cmds:
-      -   task: download
-      -   task: lint
-      -   task: test
+      - task: download
+      - task: lint
+      - task: test
