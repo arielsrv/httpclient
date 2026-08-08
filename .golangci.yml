@@ -458,6 +458,14 @@ linters:
       - text: 'comment on exported \S+ \S+ should be of the form ".+"'
         source: '// ?(nolint|TODO)'
         linters: [ revive, staticcheck ]
+      # examples/ es un modulo aparte de programas demo: escribir a stdout es
+      # justamente lo que muestran, y un log.Fatal en main saltea defers que el
+      # proceso al salir libera igual.
+      - path: '^examples/'
+        linters: [ forbidigo ]
+      - path: '^examples/'
+        text: 'exitAfterDefer'
+        linters: [ gocritic ]
       - path: '_test\.go'
         linters:
           - bodyclose

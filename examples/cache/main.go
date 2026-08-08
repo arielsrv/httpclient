@@ -16,8 +16,8 @@ import (
 type UserResponse struct {
 	Name   string `json:"name"`
 	Email  string `json:"email"`
-	Header string
-	ID     int `json:"id"`
+	Header string `json:"header"`
+	ID     int    `json:"id"`
 }
 
 func main() {
