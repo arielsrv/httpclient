@@ -13,6 +13,61 @@ type HTTPResponse[T any] struct {
 	codec     Codec
 }
 
+// newHTTPResponse assembles a typed response, decoding the body with codec when
+// the status is successful. Both the network path and the cache-hit path go
+// through it so a cached response is indistinguishable from a fresh one.
+func newHTTPResponse[T any](
+	raw *http.Response,
+	bodyBytes []byte,
+	codec Codec,
+) (HTTPResponse[T], error) {
+	response := HTTPResponse[T]{raw: raw, bodyBytes: bodyBytes, codec: codec}
+
+	if response.IsSuccess() && len(bodyBytes) > 0 {
+		if err := codec.Unmarshal(bodyBytes, &response.data); err != nil {
+			return response, fmt.Errorf("deserializing response: %w", err)
+		}
+	}
+
+	return response, nil
+}
+
+// toCacheEntry captures the parts of the response worth storing. The decoded
+// data is left out: it is rebuilt from the body on the way back, which keeps the
+// entry usable from any type parameter.
+func (r HTTPResponse[T]) toCacheEntry() cachedResponse {
+	return cachedResponse{
+		StatusCode: r.raw.StatusCode,
+		Headers:    r.raw.Header,
+		Body:       r.bodyBytes,
+	}
+}
+
+// responseFromCache rebuilds a typed response from a stored entry. The codec is
+// negotiated exactly as it was for the live response, preferring the caller's
+// Accept header over the stored Content-Type.
+func responseFromCache[T any](
+	entry cachedResponse,
+	headers []http.Header,
+) (*HTTPResponse[T], error) {
+	raw := &http.Response{StatusCode: entry.StatusCode, Header: entry.Headers}
+	if raw.Header == nil {
+		raw.Header = make(http.Header)
+	}
+
+	codec := codecForAcceptHeader(headers)
+	if codec == nil {
+		codec = codecForContentType(raw.Header.Get(contentTypeHeader))
+	}
+
+	response, err := newHTTPResponse[T](raw, entry.Body, codec)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
 func (r HTTPResponse[T]) Data() T {
 	return r.data
 }

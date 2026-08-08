@@ -1,6 +1,7 @@
 package httpclient_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1082,13 +1084,20 @@ func countingServer(hits *atomic.Int64, body any, headers map[string]string) *ht
 	}))
 }
 
+// inMemoryCache builds a fresh Ristretto-backed cache for a test.
+func inMemoryCache(t *testing.T, byteSize int64) *httpclient.InMemoryClientCache {
+	t.Helper()
+	cache, err := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: byteSize})
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+	return cache
+}
+
 // cachingClient builds a client backed by a fresh in-memory cache.
 func cachingClient(t *testing.T, opts ...httpclient.ClientOption) *httpclient.HTTPClient {
 	t.Helper()
 	all := append([]httpclient.ClientOption{
-		httpclient.WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
-			ByteSize: 1024,
-		}), 2),
+		httpclient.WithCache(inMemoryCache(t, 1<<20), 2),
 	}, opts...)
 	client := httpclient.NewHTTPClient(all...)
 	t.Cleanup(client.Close)
@@ -1123,7 +1132,7 @@ func TestCache_CloseFlushesPendingWrites(t *testing.T) {
 	server := countingServer(&hits, testUser{ID: 9, Name: "Frank"}, nil)
 	defer server.Close()
 
-	cache := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: 1024})
+	cache := inMemoryCache(t, 1<<20)
 	client := httpclient.NewHTTPClient(httpclient.WithCache(cache, 2))
 
 	_, err := client.Get[testUser](context.Background(), server.URL)
@@ -1318,16 +1327,17 @@ func TestRace_ConcurrentCacheWrites(t *testing.T) {
 func TestInMemoryCache_TTL(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cache := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: 1024})
+	cache := inMemoryCache(t, 1<<20)
 
-	require.NoError(t, cache.Set(ctx, "sticky", "v"))
-	require.NoError(t, cache.Set(ctx, "brief", "v", 20*time.Millisecond))
+	require.NoError(t, cache.Set(ctx, "sticky", []byte("v")))
+	require.NoError(t, cache.Set(ctx, "brief", []byte("v"), 20*time.Millisecond))
 
-	_, found, err := cache.Get(ctx, "brief")
+	value, found, err := cache.Get(ctx, "brief")
 	require.NoError(t, err)
-	assert.True(t, found)
+	require.True(t, found)
+	assert.Equal(t, []byte("v"), value)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
 
 	_, found, err = cache.Get(ctx, "brief")
 	require.NoError(t, err)
@@ -1336,6 +1346,45 @@ func TestInMemoryCache_TTL(t *testing.T) {
 	_, found, err = cache.Get(ctx, "sticky")
 	require.NoError(t, err)
 	assert.True(t, found, "entry without TTL should survive")
+}
+
+// TestInMemoryCache_MissIsNotAnError verifies the contract every backend must
+// honor: an absent key is a miss, not a failure.
+func TestInMemoryCache_MissIsNotAnError(t *testing.T) {
+	t.Parallel()
+	value, found, err := inMemoryCache(t, 1<<20).Get(context.Background(), "absent")
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Nil(t, value)
+}
+
+// TestInMemoryCache_EvictsByByteSize verifies ByteSize is a real budget: writing
+// far more than it allows must not grow the cache without bound.
+func TestInMemoryCache_EvictsByByteSize(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const (
+		budget    = 8 << 10 // 8 KiB
+		entrySize = 1 << 10 // 1 KiB
+		entries   = 200     // 200 KiB written in total
+	)
+	cache := inMemoryCache(t, budget)
+	payload := bytes.Repeat([]byte("x"), entrySize)
+
+	for i := range entries {
+		require.NoError(t, cache.Set(ctx, strconv.Itoa(i), payload))
+	}
+
+	kept := 0
+	for i := range entries {
+		if _, found, err := cache.Get(ctx, strconv.Itoa(i)); err == nil && found {
+			kept++
+		}
+	}
+
+	assert.NotZero(t, kept, "the cache should still hold something")
+	assert.LessOrEqual(t, kept, budget/entrySize,
+		"a %d-byte budget cannot hold %d entries of %d bytes", budget, kept, entrySize)
 }
 
 // blockingCache holds every Set until release is closed, so tests can pin a cache
@@ -1355,7 +1404,7 @@ func newBlockingCache() *blockingCache {
 func (r *blockingCache) Set(
 	ctx context.Context,
 	key string,
-	value any,
+	value []byte,
 	ttl ...time.Duration,
 ) error {
 	select {
@@ -1366,7 +1415,7 @@ func (r *blockingCache) Set(
 	return nil
 }
 
-func (r *blockingCache) Get(ctx context.Context, key string) (any, bool, error) {
+func (r *blockingCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	return nil, false, nil
 }
 

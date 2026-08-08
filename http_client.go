@@ -3,7 +3,6 @@ package httpclient
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -204,14 +203,8 @@ func (r *HTTPClient) doRequest[T any](
 	headers ...http.Header,
 ) (*HTTPResponse[T], error) {
 	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
-		r.awaitPendingWrite(ctx, url)
-		value, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
-		switch {
-		case errors.Is(err, ErrCacheMiss): // nothing cached — fall through to the network
-		case err != nil:
-			return nil, fmt.Errorf("getting cached response: %w", err)
-		case !value.Revalidate():
-			return value, nil
+		if cached := r.cachedResponse[T](ctx, url, headers); cached != nil {
+			return cached, nil
 		}
 	}
 
@@ -244,36 +237,56 @@ func (r *HTTPClient) doRequest[T any](
 	// Fall back to the response Content-Type for standard negotiation.
 	codec := codecForAcceptHeader(headers)
 	if codec == nil {
-		codec = codecForContentType(response.Header.Get("Content-Type"))
+		codec = codecForContentType(response.Header.Get(contentTypeHeader))
 	}
 
-	httpResponse := HTTPResponse[T]{
-		raw:       response,
-		bodyBytes: bodyBytes,
-		codec:     codec,
-	}
-
-	if httpResponse.IsSuccess() && len(bodyBytes) > 0 {
-		if unmarshalErr := codec.Unmarshal(bodyBytes, &httpResponse.data); unmarshalErr != nil {
-			return nil, fmt.Errorf("deserializing response: %w", unmarshalErr)
-		}
+	httpResponse, err := newHTTPResponse[T](response, bodyBytes, codec)
+	if err != nil {
+		return nil, err
 	}
 
 	if r.cacheableMethods.Contains(request.Method) && r.cacheEnabled() {
 		if ttl, cacheable := httpResponse.Cacheable(r.defaultCacheTTL); cacheable {
-			r.cacheAsync(ctx, request.URL.String(), httpResponse, ttl)
+			r.cacheAsync(ctx, request.URL.String(), httpResponse.toCacheEntry(), ttl)
 		}
 	}
 
 	return &httpResponse, nil
 }
 
-// cacheAsync queues the cache write on the pool and registers it in pendingWrites
-// so a read of the same key does not race ahead of it.
-func (r *HTTPClient) cacheAsync[T any](
+// cachedResponse returns the stored response for key, or nil when there is
+// nothing usable. The cache is best-effort: a miss, an unreachable backend and an
+// entry that does not decode into T all end up the same way, sending the caller
+// to the network rather than failing the request.
+func (r *HTTPClient) cachedResponse[T any](
 	ctx context.Context,
 	key string,
-	response HTTPResponse[T],
+	headers []http.Header,
+) *HTTPResponse[T] {
+	r.awaitPendingWrite(ctx, key)
+
+	entry, err := r.kvs.Get(ctx, key)
+	if err != nil {
+		return nil
+	}
+
+	response, err := responseFromCache[T](*entry, headers)
+	if err != nil {
+		return nil
+	}
+	if response.Revalidate() {
+		return nil
+	}
+
+	return response
+}
+
+// cacheAsync queues the cache write on the pool and registers it in pendingWrites
+// so a read of the same key does not race ahead of it.
+func (r *HTTPClient) cacheAsync(
+	ctx context.Context,
+	key string,
+	entry cachedResponse,
 	ttl time.Duration,
 ) {
 	// The caller may cancel ctx as soon as doRequest returns, while the write is
@@ -290,7 +303,7 @@ func (r *HTTPClient) cacheAsync[T any](
 			r.pendingWrites.Delete(key)
 			close(done)
 		}()
-		_ = r.kvs.Set(cacheCtx, key, response, ttl)
+		_ = r.kvs.Set(cacheCtx, key, entry, ttl)
 	})
 	if err != nil {
 		// Pool stopped: the task will never run, so release the waiters.

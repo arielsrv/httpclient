@@ -47,12 +47,17 @@ func main() {
 	server.EnableHTTP2 = true
 	defer server.Close()
 
-	httpClient := httpclient.NewHTTPClient(httpclient.
-		WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
-			ByteSize: 1024,
-		}),
-			runtime.NumCPU()-1,
-		))
+	// The in-memory cache is backed by Ristretto: ByteSize is a real budget, and
+	// entries are evicted by cost once it is reached.
+	cache, err := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
+		ByteSize: 8 << 20, // 8 MiB
+	})
+	if err != nil {
+		log.Fatalf("creating cache: %v", err)
+	}
+	defer cache.Close()
+
+	httpClient := httpclient.NewHTTPClient(httpclient.WithCache(cache, runtime.NumCPU()-1))
 	// Close drains the pool that writes cache entries in the background.
 	defer httpClient.Close()
 
