@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	redisImage     = "redis:7-alpine"
+	redisImage     = "redis:8-alpine"
 	memcachedImage = "memcached:1.6-alpine"
 	containerBoot  = 2 * time.Minute
 )

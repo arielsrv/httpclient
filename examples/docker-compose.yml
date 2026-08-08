@@ -9,7 +9,7 @@
 # need no configuration beyond the zero value.
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: httpclient-redis
     ports:
       - "6379:6379"
