@@ -429,6 +429,12 @@ linters:
         # Omit embedded fields from selector expression.
         # https://staticcheck.dev/docs/checks/#QF1008
         - -QF1008
+        # TEMPORAL: staticcheck v0.8.0-rc.1 panica analizando go1.27rc2
+        # ("index out of range [1] with length 1" en analysis/facts/nilness),
+        # y el panic tumba a todo goanalysis_metalinter. Reactivar cuando
+        # honnef.co/go/tools tenga release estable para 1.27.
+        # https://staticcheck.dev/docs/checks/#SA4023
+        - -SA4023
 
     usetesting:
       # Enable/disable `os.TempDir()` detections.
