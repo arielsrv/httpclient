@@ -16,9 +16,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Lets the go command fetch the toolchain required by go.mod when the runner
-  # ships an older one.
-  GOTOOLCHAIN: auto
+  # Pinned in one place: go.mod requires 1.27 (generic methods) and there is no
+  # stable 1.27 release yet, so setup-go cannot resolve it from go.mod.
+  # Switch to '1.27.x' once it ships.
+  GO_VERSION: '1.27.0-rc.2'
+  # The pinned toolchain already satisfies go.mod; never try to fetch another
+  # one, which would fail while 1.27 is unreleased.
+  GOTOOLCHAIN: local
 
 jobs:
   build:
@@ -29,9 +33,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          # Follows the `go` directive in go.mod (currently 1.27, needed for
-          # generic methods).
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Vet
@@ -52,7 +54,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       # golangci-lint, gofumpt and mockery are declared as tool dependencies in
@@ -89,7 +91,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       # -short leaves out the container-backed cache tests; the integration job
@@ -121,7 +123,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       # Containers are started by testcontainers from inside the tests, using the
@@ -137,7 +139,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: govulncheck
