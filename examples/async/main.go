@@ -10,14 +10,14 @@ import (
 )
 
 type User struct {
-	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
+	ID    int    `json:"id"`
 }
 
 type Post struct {
-	ID     int    `json:"id"`
 	Title  string `json:"title"`
+	ID     int    `json:"id"`
 	UserID int    `json:"user_id"`
 }
 

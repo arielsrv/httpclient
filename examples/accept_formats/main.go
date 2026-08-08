@@ -10,11 +10,11 @@ import (
 
 // User maps a single entry from gorest.co.in /public/v2/users.
 type User struct {
-	ID     int    `json:"id"     xml:"id"`
 	Name   string `json:"name"   xml:"name"`
 	Email  string `json:"email"  xml:"email"`
 	Gender string `json:"gender" xml:"gender"`
 	Status string `json:"status" xml:"status"`
+	ID     int    `json:"id"     xml:"id"`
 }
 
 // UserList wraps the XML envelope: <objects type="array"><object>…</object></objects>.

@@ -13,17 +13,17 @@ import (
 // XMLName is form:"-" so the form encoder skips it (it is not a real field).
 type Order struct {
 	XMLName xml.Name `json:"-"    xml:"order" form:"-"`
-	ID      int      `json:"id"   xml:"id"    form:"id"`
 	Item    string   `json:"item" xml:"item"  form:"item"`
+	ID      int      `json:"id"   xml:"id"    form:"id"`
 }
 
 // httpbinResponse captures the fields of httpbin.org/post's echo that we care
 // about: how the request arrived on the server side.
 type httpbinResponse struct {
-	Data    string            `json:"data"` // raw body (used for XML)
 	JSON    map[string]any    `json:"json"` // parsed body when JSON
 	Form    map[string]any    `json:"form"` // parsed body when form-encoded
 	Headers map[string]string `json:"headers"`
+	Data    string            `json:"data"` // raw body (used for XML)
 }
 
 func main() {

@@ -12,16 +12,16 @@ import (
 
 // CreateUser is the success payload the caller expects on 2xx.
 type CreateUser struct {
-	ID   int    `json:"id"`
 	Name string `json:"name"`
+	ID   int    `json:"id"`
 }
 
 // Problem models an RFC 7807 application/problem+json error body.
 type Problem struct {
 	Type   string `json:"type"`
 	Title  string `json:"title"`
-	Status int    `json:"status"`
 	Detail string `json:"detail"`
+	Status int    `json:"status"`
 }
 
 func main() {

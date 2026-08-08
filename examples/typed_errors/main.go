@@ -10,9 +10,9 @@ import (
 )
 
 type User struct {
-	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
+	ID    int    `json:"id"`
 }
 
 // APIError models the structured error body that the API returns on non-2xx.
