@@ -23,6 +23,10 @@ const DefaultTimeout = 30 * time.Second
 // no freshness information (no Cache-Control max-age, no Expires).
 const DefaultCacheTTL = 5 * time.Minute
 
+// DefaultRevalidationWindow is how long a response is kept past its freshness so
+// that it can be revalidated with a conditional request instead of refetched.
+const DefaultRevalidationWindow = time.Hour
+
 type HTTPClient struct {
 	httpKeyGenerator HTTPKeyGenerator
 	kvs              *KVS
@@ -30,10 +34,11 @@ type HTTPClient struct {
 	cacheableMethods *hashset.Set
 	// pendingWrites maps a cache key to a channel closed once its queued write
 	// has landed, so a follow-up read of the same key sees it instead of missing.
-	pendingWrites    sync.Map
-	lowLevelClient   http.Client
-	defaultCacheTTL  time.Duration
-	concurrencyLevel int
+	pendingWrites      sync.Map
+	lowLevelClient     http.Client
+	defaultCacheTTL    time.Duration
+	revalidationWindow time.Duration
+	concurrencyLevel   int
 }
 
 func NewHTTPClient(opts ...ClientOption) *HTTPClient {
@@ -42,9 +47,10 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 			Transport: NewConnectionPool().transport,
 			Timeout:   DefaultTimeout,
 		},
-		httpKeyGenerator: defaultCacheKeyGenerator{},
-		concurrencyLevel: defaultConcurrencyLevel(),
-		defaultCacheTTL:  DefaultCacheTTL,
+		httpKeyGenerator:   defaultCacheKeyGenerator{},
+		concurrencyLevel:   defaultConcurrencyLevel(),
+		defaultCacheTTL:    DefaultCacheTTL,
+		revalidationWindow: DefaultRevalidationWindow,
 		cacheableMethods: hashset.New(
 			http.MethodGet,
 			http.MethodHead,
@@ -202,15 +208,32 @@ func (r *HTTPClient) doRequest[T any](
 	body Body,
 	headers ...http.Header,
 ) (*HTTPResponse[T], error) {
-	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
-		if cached := r.cachedResponse[T](ctx, url, headers); cached != nil {
-			return cached, nil
+	// A stored entry is used in one of two ways: served outright while it is
+	// fresh, or — once stale — turned into a conditional request so the origin
+	// can answer 304 and spare the body.
+	var (
+		key   string
+		entry *cachedResponse
+	)
+	caching := r.cacheableMethods.Contains(method) && r.cacheEnabled()
+	if caching {
+		key = r.httpKeyGenerator.Generate(method, url, headers...)
+		entry = r.cachedEntry(ctx, key)
+		if entry != nil && !entry.mustRevalidate(time.Now()) {
+			if cached, cacheErr := responseFromCache[T](*entry, headers); cacheErr == nil {
+				return cached, nil
+			}
+			// The stored body no longer decodes into T; refetch it.
+			entry = nil
 		}
 	}
 
 	request, err := r.newRequest(ctx, method, url, body, headers...)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	if entry != nil {
+		applyValidators(request, *entry)
 	}
 
 	response, doErr := r.lowLevelClient.Do(request)
@@ -231,6 +254,14 @@ func (r *HTTPClient) doRequest[T any](
 		return nil, fmt.Errorf("closing response body: %w", closeErr)
 	}
 
+	// 304 means our copy is still good: serve it, and put it back with the
+	// freshness the origin just granted.
+	if entry != nil && response.StatusCode == http.StatusNotModified {
+		refreshed := entry.refreshedWith(response.Header, r.defaultCacheTTL, time.Now())
+		r.cacheAsync(ctx, key, refreshed, refreshed.FreshFor+r.revalidationWindow)
+		return responseFromCache[T](refreshed, headers)
+	}
+
 	// Prefer the Accept header (caller intent) for codec selection — this lets
 	// AcceptBinary() force byteCodec even when the server responds with a
 	// content type not in the registry (image/x-icon, image/png, etc.).
@@ -245,40 +276,44 @@ func (r *HTTPClient) doRequest[T any](
 		return nil, err
 	}
 
-	if r.cacheableMethods.Contains(request.Method) && r.cacheEnabled() {
-		if ttl, cacheable := httpResponse.Cacheable(r.defaultCacheTTL); cacheable {
-			r.cacheAsync(ctx, request.URL.String(), httpResponse.toCacheEntry(), ttl)
+	if caching {
+		if freshFor, cacheable := httpResponse.Cacheable(r.defaultCacheTTL); cacheable {
+			// Stored past its freshness so the entry survives to be revalidated.
+			r.cacheAsync(
+				ctx,
+				key,
+				httpResponse.toCacheEntry(freshFor),
+				freshFor+r.revalidationWindow,
+			)
 		}
 	}
 
 	return &httpResponse, nil
 }
 
-// cachedResponse returns the stored response for key, or nil when there is
-// nothing usable. The cache is best-effort: a miss, an unreachable backend and an
-// entry that does not decode into T all end up the same way, sending the caller
-// to the network rather than failing the request.
-func (r *HTTPClient) cachedResponse[T any](
-	ctx context.Context,
-	key string,
-	headers []http.Header,
-) *HTTPResponse[T] {
+// cachedEntry returns the stored entry for key, or nil when there is none to be
+// had. The cache is best-effort: a miss and an unreachable backend end up the
+// same way, sending the caller to the network rather than failing the request.
+func (r *HTTPClient) cachedEntry(ctx context.Context, key string) *cachedResponse {
 	r.awaitPendingWrite(ctx, key)
 
 	entry, err := r.kvs.Get(ctx, key)
 	if err != nil {
 		return nil
 	}
+	return entry
+}
 
-	response, err := responseFromCache[T](*entry, headers)
-	if err != nil {
-		return nil
+// applyValidators turns request into a conditional one, so a stale entry can be
+// confirmed with a 304 instead of downloaded again. Headers the caller set
+// explicitly win — they may be running their own conditional logic.
+func applyValidators(request *http.Request, entry cachedResponse) {
+	for name, values := range entry.validators() {
+		if request.Header.Get(name) != "" {
+			continue
+		}
+		request.Header[name] = values
 	}
-	if response.Revalidate() {
-		return nil
-	}
-
-	return response
 }
 
 // cacheAsync queues the cache write on the pool and registers it in pendingWrites

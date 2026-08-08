@@ -7,6 +7,7 @@ package httpclient_test
 import (
 	"context"
 	"net/http"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/arielsrv/httpclient"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -26,6 +28,17 @@ const (
 	memcachedImage = "memcached:1.6-alpine"
 	containerBoot  = 2 * time.Minute
 )
+
+// TestMain silences go-redis's internal logger: the degradation test points the
+// client at a dead port on purpose, and its retry chatter would bury the results.
+func TestMain(m *testing.M) {
+	redis.SetLogger(discardLogger{})
+	os.Exit(m.Run())
+}
+
+type discardLogger struct{}
+
+func (discardLogger) Printf(context.Context, string, ...any) {}
 
 // hostPort resolves the host and mapped port a container is reachable at.
 func hostPort(

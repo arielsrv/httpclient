@@ -2,9 +2,13 @@ package httpclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -39,10 +43,68 @@ type Cache interface {
 // only accept bytes, so an entry travels as JSON instead of holding on to a live
 // [http.Response]. Body is base64-encoded by encoding/json, which keeps binary
 // payloads intact.
+//
+// An entry outlives its freshness on purpose: once stale it can still answer a
+// conditional request, turning a refetch into a 304 that costs no body transfer.
 type cachedResponse struct {
-	Headers    http.Header `json:"headers"`
-	Body       []byte      `json:"body"`
-	StatusCode int         `json:"status_code"`
+	StoredAt   time.Time     `json:"stored_at"`
+	Headers    http.Header   `json:"headers"`
+	Body       []byte        `json:"body"`
+	FreshFor   time.Duration `json:"fresh_for"`
+	StatusCode int           `json:"status_code"`
+}
+
+// isFresh reports whether the entry is still within its freshness lifetime.
+func (r cachedResponse) isFresh(now time.Time) bool {
+	return now.Sub(r.StoredAt) < r.FreshFor
+}
+
+// mustRevalidate reports whether the entry may not be served as it stands:
+// either it has gone stale, or the origin marked it no-cache.
+func (r cachedResponse) mustRevalidate(now time.Time) bool {
+	if parseCacheControl(r.Headers.Get(cacheControlHeader)).has(directiveNoCache) {
+		return true
+	}
+	return !r.isFresh(now)
+}
+
+// validators returns the conditional headers that let the origin reply 304
+// instead of resending the body. Empty when the response carried no validator,
+// in which case a stale entry can only be refetched in full.
+func (r cachedResponse) validators() http.Header {
+	conditional := make(http.Header)
+	if etag := r.Headers.Get(etagHeader); etag != "" {
+		conditional.Set(ifNoneMatchHeader, etag)
+	}
+	if modified := r.Headers.Get(lastModifiedHeader); modified != "" {
+		conditional.Set(ifModifiedSinceHeader, modified)
+	}
+	return conditional
+}
+
+// refreshedWith folds a 304 response into the entry: the body still stands, only
+// its freshness and the headers the origin resent are updated (RFC 9111 §4.3.4).
+func (r cachedResponse) refreshedWith(
+	notModified http.Header,
+	defaultTTL time.Duration,
+	now time.Time,
+) cachedResponse {
+	headers := make(http.Header, len(r.Headers))
+	maps.Copy(headers, r.Headers)
+	maps.Copy(headers, notModified)
+
+	refreshed := cachedResponse{
+		StatusCode: r.StatusCode,
+		Headers:    headers,
+		Body:       r.Body,
+		StoredAt:   now,
+		FreshFor:   r.FreshFor,
+	}
+	if freshFor, storable := freshnessFor(headers, defaultTTL); storable {
+		refreshed.FreshFor = freshFor
+	}
+
+	return refreshed
 }
 
 // KVS serializes cache entries on their way to and from a Cache backend.
@@ -81,14 +143,60 @@ func (r *KVS) Get(ctx context.Context, key string) (*cachedResponse, error) {
 	return &entry, nil
 }
 
+// HTTPKeyGenerator derives the cache key of a request. Two requests that could
+// legitimately receive different responses must map to different keys — the URL
+// alone is not enough, since request headers select both which representation
+// the origin returns and, with Authorization, whose it is.
 type HTTPKeyGenerator interface {
 	Generate(method, url string, headers ...http.Header) string
 }
 
+const (
+	authorizationHeader  = "Authorization"
+	cookieHeader         = "Cookie"
+	acceptLanguageHeader = "Accept-Language"
+	acceptEncodingHeader = "Accept-Encoding"
+)
+
+// keyVaryingHeaders are the request headers the default generator folds into the
+// key. Accept* pick a representation; Authorization and Cookie pick an identity,
+// and leaving those out would serve one caller's response to another — a real
+// risk now that entries can live in a Redis shared across processes.
+var keyVaryingHeaders = []string{
+	authorizationHeader,
+	cookieHeader,
+	acceptHeader,
+	acceptLanguageHeader,
+	acceptEncodingHeader,
+}
+
 type defaultCacheKeyGenerator struct{}
 
+// Generate keys on the method, the URL and the varying request headers. The
+// varying part is hashed rather than spelled out so that credentials never
+// surface in a key listing of a shared cache.
 func (defaultCacheKeyGenerator) Generate(method, rawURL string, headers ...http.Header) string {
-	return rawURL
+	digest := sha256.New()
+	writeDigestField(digest, rawURL)
+
+	for _, name := range keyVaryingHeaders {
+		writeDigestField(digest, name)
+		// The same header may be spread over several maps, so values are read in
+		// argument order to keep the key stable.
+		for _, header := range headers {
+			for _, value := range header.Values(name) {
+				writeDigestField(digest, value)
+			}
+		}
+	}
+
+	return "httpclient:" + method + ":" + hex.EncodeToString(digest.Sum(nil))
+}
+
+// writeDigestField appends a length-delimited field, so that concatenations such
+// as ("ab", "c") and ("a", "bc") cannot collide.
+func writeDigestField(digest hash.Hash, value string) {
+	_, _ = fmt.Fprintf(digest, "%d:%s", len(value), value)
 }
 
 // --- Backends ---

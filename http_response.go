@@ -3,6 +3,7 @@ package httpclient
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -32,14 +33,16 @@ func newHTTPResponse[T any](
 	return response, nil
 }
 
-// toCacheEntry captures the parts of the response worth storing. The decoded
-// data is left out: it is rebuilt from the body on the way back, which keeps the
-// entry usable from any type parameter.
-func (r HTTPResponse[T]) toCacheEntry() cachedResponse {
+// toCacheEntry captures the parts of the response worth storing, valid for
+// freshFor. The decoded data is left out: it is rebuilt from the body on the way
+// back, which keeps the entry usable from any type parameter.
+func (r HTTPResponse[T]) toCacheEntry(freshFor time.Duration) cachedResponse {
 	return cachedResponse{
 		StatusCode: r.raw.StatusCode,
 		Headers:    r.raw.Header,
 		Body:       r.bodyBytes,
+		StoredAt:   time.Now(),
+		FreshFor:   freshFor,
 	}
 }
 
@@ -109,9 +112,9 @@ func (r HTTPResponse[T]) As[E any]() (E, error) {
 }
 
 // Revalidate reports whether a cached copy of this response must be checked with
-// the origin before it is reused. Conditional requests (ETag/If-None-Match) are
-// not implemented yet, so a true result simply means the cached copy is skipped
-// and the request goes to the network.
+// the origin before being reused, that is whether it carries Cache-Control:
+// no-cache. The client revalidates with a conditional request when the response
+// also carries an ETag or a Last-Modified.
 func (r HTTPResponse[T]) Revalidate() bool {
 	if r.raw == nil {
 		return true
@@ -123,24 +126,17 @@ func (r HTTPResponse[T]) Revalidate() bool {
 // the response's Cache-Control directives and Expires header (RFC 9111).
 // Responses that carry no freshness information fall back to defaultTTL.
 //
-// Only successful responses are cacheable; no-store and max-age=0 opt out.
+// Only successful responses are cacheable; no-store, max-age=0 and Vary: *
+// opt out.
 func (r HTTPResponse[T]) Cacheable(defaultTTL time.Duration) (time.Duration, bool) {
 	if r.raw == nil || !r.IsSuccess() {
 		return 0, false
 	}
 
-	directives := parseCacheControl(r.raw.Header.Get(cacheControlHeader))
-	if directives.has(directiveNoStore) {
+	// Vary: * means the response depends on something no cache key can capture.
+	if strings.TrimSpace(r.raw.Header.Get(varyHeader)) == "*" {
 		return 0, false
 	}
 
-	if maxAge, found := directives.duration(directiveMaxAge); found {
-		return maxAge, maxAge > 0
-	}
-
-	if ttl, found := freshnessFromExpires(r.raw.Header); found {
-		return ttl, true
-	}
-
-	return defaultTTL, defaultTTL > 0
+	return freshnessFor(r.raw.Header, defaultTTL)
 }

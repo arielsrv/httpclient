@@ -11,11 +11,36 @@ const (
 	cacheControlHeader = "Cache-Control"
 	expiresHeader      = "Expires"
 	dateHeader         = "Date"
+	varyHeader         = "Vary"
+
+	etagHeader            = "ETag"
+	lastModifiedHeader    = "Last-Modified"
+	ifNoneMatchHeader     = "If-None-Match"
+	ifModifiedSinceHeader = "If-Modified-Since"
 
 	directiveNoStore = "no-store"
 	directiveNoCache = "no-cache"
 	directiveMaxAge  = "max-age"
 )
+
+// freshnessFor derives how long a response carrying these headers stays fresh.
+// The second result is false when it must not be stored at all.
+func freshnessFor(headers http.Header, defaultTTL time.Duration) (time.Duration, bool) {
+	directives := parseCacheControl(headers.Get(cacheControlHeader))
+	if directives.has(directiveNoStore) {
+		return 0, false
+	}
+
+	if maxAge, found := directives.duration(directiveMaxAge); found {
+		return maxAge, maxAge > 0
+	}
+
+	if ttl, found := freshnessFromExpires(headers); found {
+		return ttl, true
+	}
+
+	return defaultTTL, defaultTTL > 0
+}
 
 // cacheControl holds the directives of a Cache-Control header. Valueless
 // directives (no-store, no-cache, …) map to an empty string.

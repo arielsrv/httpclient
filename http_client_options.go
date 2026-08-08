@@ -46,6 +46,28 @@ func WithDefaultCacheTTL(ttl time.Duration) ClientOption {
 	}
 }
 
+// WithCacheRevalidationWindow sets how long a response is kept past its freshness
+// so it can be confirmed with a conditional request (If-None-Match /
+// If-Modified-Since) rather than downloaded again. Pass 0 to drop entries as soon
+// as they go stale, which disables conditional revalidation.
+func WithCacheRevalidationWindow(window time.Duration) ClientOption {
+	return func(c *HTTPClient) {
+		c.revalidationWindow = window
+	}
+}
+
+// WithCacheKeyGenerator replaces how cache keys are derived from a request.
+// The default keys on the method, the URL and the request headers that select a
+// representation — Authorization and Cookie among them, so that one caller's
+// response is never served to another.
+func WithCacheKeyGenerator(generator HTTPKeyGenerator) ClientOption {
+	return func(c *HTTPClient) {
+		if generator != nil {
+			c.httpKeyGenerator = generator
+		}
+	}
+}
+
 // WithFollowRedirects controls whether the client follows HTTP redirects (3xx).
 // By default, the standard library follows up to 10 redirects automatically.
 // Pass false to disable redirect following entirely — the first 3xx response is

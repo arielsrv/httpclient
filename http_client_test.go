@@ -1125,6 +1125,12 @@ func TestCache_ReadYourWrites(t *testing.T) {
 	assert.Equal(t, int64(1), hits.Load(), "second GET should be served from cache")
 }
 
+// fixedKeyGenerator maps every request to the same key, so a test can look the
+// entry up in the backing store without reproducing the real key derivation.
+type fixedKeyGenerator struct{ key string }
+
+func (r fixedKeyGenerator) Generate(_, _ string, _ ...http.Header) string { return r.key }
+
 // TestCache_CloseFlushesPendingWrites verifies Close waits for queued writes.
 func TestCache_CloseFlushesPendingWrites(t *testing.T) {
 	t.Parallel()
@@ -1133,13 +1139,16 @@ func TestCache_CloseFlushesPendingWrites(t *testing.T) {
 	defer server.Close()
 
 	cache := inMemoryCache(t, 1<<20)
-	client := httpclient.NewHTTPClient(httpclient.WithCache(cache, 2))
+	client := httpclient.NewHTTPClient(
+		httpclient.WithCache(cache, 2),
+		httpclient.WithCacheKeyGenerator(fixedKeyGenerator{key: "frank"}),
+	)
 
 	_, err := client.Get[testUser](context.Background(), server.URL)
 	require.NoError(t, err)
 	client.Close()
 
-	_, found, err := cache.Get(context.Background(), server.URL)
+	_, found, err := cache.Get(context.Background(), "frank")
 	require.NoError(t, err)
 	assert.True(t, found, "the queued write should have landed before Close returned")
 }
@@ -1472,4 +1481,289 @@ func TestCache_GetAfterCloseDoesNotHang(t *testing.T) {
 	}
 
 	assert.Equal(t, int64(2), hits.Load(), "a stopped pool cannot populate the cache")
+}
+
+// --- Cache key ---
+
+// TestCache_KeyIsolatesAuthorization is the one that matters for correctness:
+// two callers hitting the same URL with different credentials must never see
+// each other's response.
+func TestCache_KeyIsolatesAuthorization(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "max-age=60")
+		// The origin answers with whoever is asking.
+		if err := json.NewEncoder(w).Encode(testUser{
+			ID:   1,
+			Name: r.Header.Get("Authorization"),
+		}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	alice := http.Header{"Authorization": []string{"Bearer alice"}}
+	bob := http.Header{"Authorization": []string{"Bearer bob"}}
+
+	first, err := client.Get[testUser](ctx, server.URL, alice)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer alice", first.Data().Name)
+
+	second, err := client.Get[testUser](ctx, server.URL, bob)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer bob", second.Data().Name, "bob must not be served alice's response")
+	assert.Equal(t, int64(2), hits.Load(), "a different identity is a different key")
+
+	// Alice asking again is still a hit on her own entry.
+	third, err := client.Get[testUser](ctx, server.URL, alice)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer alice", third.Data().Name)
+	assert.Equal(t, int64(2), hits.Load())
+}
+
+// TestCache_KeyIsolatesAcceptHeader verifies content negotiation is part of the
+// key: an XML and a JSON caller must not collide.
+func TestCache_KeyIsolatesAcceptHeader(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Cache-Control", "max-age=60")
+		if r.Header.Get("Accept") == "application/xml" {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write([]byte(`<user><name>Rita</name><id>2</id></user>`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 2, Name: "Rita"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	jsonResp, err := client.Get[testUser](ctx, server.URL, httpclient.AcceptJSON())
+	require.NoError(t, err)
+	require.Equal(t, "Rita", jsonResp.Data().Name)
+
+	xmlResp, err := client.Get[xmlUser](ctx, server.URL, httpclient.AcceptXML())
+	require.NoError(t, err)
+	assert.Equal(t, "Rita", xmlResp.Data().Name)
+	assert.Equal(t, int64(2), hits.Load(), "a different Accept is a different key")
+}
+
+// TestCache_KeyDoesNotLeakCredentials verifies the derived key cannot be mined
+// for the token it varies on.
+func TestCache_KeyDoesNotLeakCredentials(t *testing.T) {
+	t.Parallel()
+	const secret = "Bearer super-secret-token"
+	var stored []string
+	recorder := &keyRecordingCache{keys: &stored}
+
+	server := countingServer(new(atomic.Int64), testUser{ID: 1, Name: "Sam"},
+		map[string]string{"Cache-Control": "max-age=60"})
+	defer server.Close()
+
+	client := httpclient.NewHTTPClient(httpclient.WithCache(recorder, 1))
+	_, err := client.Get[testUser](context.Background(), server.URL,
+		http.Header{"Authorization": []string{secret}})
+	require.NoError(t, err)
+	client.Close()
+
+	require.NotEmpty(t, stored)
+	for _, key := range stored {
+		assert.NotContains(t, key, secret)
+		assert.NotContains(t, key, "super-secret-token")
+	}
+}
+
+// keyRecordingCache records every key written to it and stores nothing.
+type keyRecordingCache struct {
+	keys *[]string
+	mu   sync.Mutex
+}
+
+func (r *keyRecordingCache) Set(_ context.Context, key string, _ []byte, _ ...time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	*r.keys = append(*r.keys, key)
+	return nil
+}
+
+func (r *keyRecordingCache) Get(_ context.Context, _ string) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+// --- Conditional revalidation ---
+
+// etagServer answers with the given ETag, replying 304 when the client already
+// has it. It records how many full bodies it had to send.
+func etagServer(etag string, bodies *atomic.Int64, requests *atomic.Int64) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "max-age=1")
+
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		bodies.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 3, Name: "Tess"}); err != nil {
+			panic(err)
+		}
+	}))
+}
+
+// TestCache_RevalidatesWithETag verifies a stale entry is confirmed with a
+// conditional request: the origin is contacted, but no body crosses the wire and
+// the caller still gets decoded data.
+func TestCache_RevalidatesWithETag(t *testing.T) {
+	t.Parallel()
+	var bodies, requests atomic.Int64
+	server := etagServer(`"v1"`, &bodies, &requests)
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	first, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	require.Equal(t, "Tess", first.Data().Name)
+	require.Equal(t, int64(1), bodies.Load())
+
+	// max-age=1, so the entry goes stale but stays around to be revalidated.
+	time.Sleep(1100 * time.Millisecond)
+
+	second, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Tess", second.Data().Name, "a 304 must still yield decoded data")
+	assert.Equal(t, http.StatusOK, second.StatusCode(), "the stored 200 is what is served")
+	assert.Equal(t, int64(2), requests.Load(), "the origin was contacted")
+	assert.Equal(t, int64(1), bodies.Load(), "but it did not resend the body")
+
+	// The 304 refreshed the entry, so the next call is a plain hit again.
+	third, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Tess", third.Data().Name)
+	assert.Equal(t, int64(2), requests.Load(), "refreshed entry serves without the origin")
+}
+
+// TestCache_RevalidatesWithLastModified covers the other validator.
+func TestCache_RevalidatesWithLastModified(t *testing.T) {
+	t.Parallel()
+	modified := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+	var bodies, requests atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Last-Modified", modified)
+		w.Header().Set("Cache-Control", "max-age=1")
+
+		if r.Header.Get("If-Modified-Since") == modified {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		bodies.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 4, Name: "Ugo"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	second, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Ugo", second.Data().Name)
+	assert.Equal(t, int64(1), bodies.Load(), "the body should not have been resent")
+	assert.Equal(t, int64(2), requests.Load())
+}
+
+// TestCache_RevalidationWindowZeroDisablesConditionalRequests verifies stale
+// entries are dropped rather than kept for revalidation when the window is off.
+func TestCache_RevalidationWindowZeroDisablesConditionalRequests(t *testing.T) {
+	t.Parallel()
+	var bodies, requests atomic.Int64
+	server := etagServer(`"v1"`, &bodies, &requests)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithCacheRevalidationWindow(0))
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	_, err = client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), bodies.Load(), "without a window the body is refetched in full")
+}
+
+// TestCache_CallerValidatorsWin verifies an explicit conditional header from the
+// caller is not overwritten by the stored entry's validator.
+func TestCache_CallerValidatorsWin(t *testing.T) {
+	t.Parallel()
+	var received atomic.Value
+	received.Store("")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Store(r.Header.Get("If-None-Match"))
+		w.Header().Set("ETag", `"stored"`)
+		w.Header().Set("Cache-Control", "max-age=1")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(testUser{ID: 5, Name: "Vera"}); err != nil {
+			panic(err)
+		}
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	ctx := context.Background()
+
+	_, err := client.Get[testUser](ctx, server.URL)
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+
+	_, err = client.Get[testUser](ctx, server.URL,
+		http.Header{"If-None-Match": []string{`"caller"`}})
+	require.NoError(t, err)
+	assert.Equal(t, `"caller"`, received.Load(), "the caller's validator must be preserved")
+}
+
+// TestCache_VaryStarIsNotCached verifies a response that varies on something no
+// key can capture is never stored.
+func TestCache_VaryStarIsNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 6, Name: "Wes"}, map[string]string{
+		"Cache-Control": "max-age=60",
+		"Vary":          "*",
+	})
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		_, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
 }

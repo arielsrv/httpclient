@@ -7,6 +7,8 @@ package httpclient
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -262,4 +264,193 @@ func TestNewInMemoryClientCache_DefaultsToAByteBudget(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, []byte("v"), value)
+}
+
+// --- Cache key generation ---
+
+func TestDefaultCacheKeyGenerator_Distinguishes(t *testing.T) {
+	t.Parallel()
+	const url = "https://api.example.com/users?page=2"
+	generator := defaultCacheKeyGenerator{}
+	base := generator.Generate(http.MethodGet, url)
+
+	cases := []struct {
+		name    string
+		method  string
+		url     string
+		headers []http.Header
+	}{
+		{name: "method", method: http.MethodHead, url: url},
+		{name: "url", method: http.MethodGet, url: url + "&sort=asc"},
+		{
+			name: "authorization", method: http.MethodGet, url: url,
+			headers: []http.Header{{"Authorization": {"Bearer a"}}},
+		},
+		{
+			name: "cookie", method: http.MethodGet, url: url,
+			headers: []http.Header{{"Cookie": {"session=1"}}},
+		},
+		{
+			name: "accept", method: http.MethodGet, url: url,
+			headers: []http.Header{{"Accept": {"application/xml"}}},
+		},
+		{
+			name: "accept-language", method: http.MethodGet, url: url,
+			headers: []http.Header{{"Accept-Language": {"es-AR"}}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run("varies on "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.NotEqual(t, base, generator.Generate(tc.method, tc.url, tc.headers...))
+		})
+	}
+}
+
+func TestDefaultCacheKeyGenerator_IsStable(t *testing.T) {
+	t.Parallel()
+	generator := defaultCacheKeyGenerator{}
+	const url = "https://api.example.com/users"
+
+	t.Run("same input yields the same key", func(t *testing.T) {
+		t.Parallel()
+		headers := []http.Header{{"Authorization": {"Bearer a"}}}
+		assert.Equal(t,
+			generator.Generate(http.MethodGet, url, headers...),
+			generator.Generate(http.MethodGet, url, headers...))
+	})
+
+	t.Run("headers split across maps key the same as combined", func(t *testing.T) {
+		t.Parallel()
+		split := generator.Generate(http.MethodGet, url,
+			http.Header{"Authorization": {"Bearer a"}},
+			http.Header{"Accept": {"application/json"}})
+		combined := generator.Generate(http.MethodGet, url,
+			http.Header{"Authorization": {"Bearer a"}, "Accept": {"application/json"}})
+		assert.Equal(t, split, combined)
+	})
+
+	t.Run("headers outside the varying set are ignored", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t,
+			generator.Generate(http.MethodGet, url),
+			generator.Generate(http.MethodGet, url, http.Header{"X-Request-Id": {"abc"}}))
+	})
+
+	t.Run("field boundaries cannot be forged", func(t *testing.T) {
+		t.Parallel()
+		// Without length-delimited fields these two would hash identically.
+		assert.NotEqual(t,
+			generator.Generate(http.MethodGet, "https://a.com/bc"),
+			generator.Generate(http.MethodGet, "https://a.com/b")+"c")
+		assert.NotEqual(t,
+			generator.Generate(http.MethodGet, url, http.Header{"Authorization": {"ab"}}),
+			generator.Generate(http.MethodGet, url, http.Header{"Authorization": {"a", "b"}}))
+	})
+
+	t.Run("the method stays readable in the key", func(t *testing.T) {
+		t.Parallel()
+		assert.True(
+			t,
+			strings.HasPrefix(generator.Generate(http.MethodGet, url), "httpclient:GET:"),
+		)
+	})
+}
+
+// --- Entry freshness and validators ---
+
+func TestCachedResponse_Freshness(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	entry := cachedResponse{StoredAt: now, FreshFor: time.Minute, Headers: http.Header{}}
+
+	assert.True(t, entry.isFresh(now.Add(30*time.Second)))
+	assert.False(t, entry.isFresh(now.Add(2*time.Minute)))
+	assert.False(t, entry.mustRevalidate(now.Add(30*time.Second)))
+	assert.True(t, entry.mustRevalidate(now.Add(2*time.Minute)))
+
+	noCache := cachedResponse{
+		StoredAt: now,
+		FreshFor: time.Hour,
+		Headers:  http.Header{cacheControlHeader: {"no-cache"}},
+	}
+	assert.True(t, noCache.mustRevalidate(now), "no-cache always revalidates, fresh or not")
+}
+
+func TestCachedResponse_Validators(t *testing.T) {
+	t.Parallel()
+	modified := time.Now().UTC().Format(http.TimeFormat)
+
+	// Headers are built with Set, the way net/http canonicalizes them on a real
+	// response — "ETag" is stored as "Etag".
+	withETag := http.Header{}
+	withETag.Set(etagHeader, `"v1"`)
+
+	withModified := http.Header{}
+	withModified.Set(lastModifiedHeader, modified)
+
+	withBoth := http.Header{}
+	withBoth.Set(etagHeader, `"v1"`)
+	withBoth.Set(lastModifiedHeader, modified)
+
+	wantETag := http.Header{}
+	wantETag.Set(ifNoneMatchHeader, `"v1"`)
+
+	wantModified := http.Header{}
+	wantModified.Set(ifModifiedSinceHeader, modified)
+
+	wantBoth := http.Header{}
+	wantBoth.Set(ifNoneMatchHeader, `"v1"`)
+	wantBoth.Set(ifModifiedSinceHeader, modified)
+
+	cases := []struct {
+		headers http.Header
+		want    http.Header
+		name    string
+	}{
+		{name: "etag", headers: withETag, want: wantETag},
+		{name: "last-modified", headers: withModified, want: wantModified},
+		{name: "both", headers: withBoth, want: wantBoth},
+		{name: "neither", headers: http.Header{}, want: http.Header{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, cachedResponse{Headers: tc.headers}.validators())
+		})
+	}
+}
+
+func TestCachedResponse_RefreshedWith(t *testing.T) {
+	t.Parallel()
+	stored := time.Now().Add(-time.Hour)
+	now := time.Now()
+	entry := cachedResponse{
+		StatusCode: http.StatusOK,
+		Headers: http.Header{
+			etagHeader:         {`"v1"`},
+			contentTypeHeader:  {"application/json"},
+			cacheControlHeader: {"max-age=60"},
+		},
+		Body:     []byte(`{"id":1}`),
+		StoredAt: stored,
+		FreshFor: time.Minute,
+	}
+
+	refreshed := entry.refreshedWith(http.Header{
+		cacheControlHeader: {"max-age=300"},
+		"X-Served-By":      {"edge-7"},
+	}, DefaultCacheTTL, now)
+
+	assert.Equal(t, entry.Body, refreshed.Body, "the body is what a 304 lets us keep")
+	assert.Equal(t, http.StatusOK, refreshed.StatusCode, "not the 304's status")
+	assert.Equal(t, now, refreshed.StoredAt)
+	assert.Equal(t, 5*time.Minute, refreshed.FreshFor, "freshness comes from the 304")
+	assert.Equal(t, "edge-7", refreshed.Headers.Get("X-Served-By"), "new headers are merged in")
+	assert.Equal(t, "application/json", refreshed.Headers.Get(contentTypeHeader),
+		"headers the 304 omitted are preserved")
+	assert.Equal(t, "max-age=60", entry.Headers.Get(cacheControlHeader),
+		"the original entry must not be mutated")
 }
