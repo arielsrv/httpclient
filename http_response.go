@@ -53,10 +53,39 @@ func (r HTTPResponse[T]) As[E any]() (E, error) {
 	return out, nil
 }
 
+// Revalidate reports whether a cached copy of this response must be checked with
+// the origin before it is reused. Conditional requests (ETag/If-None-Match) are
+// not implemented yet, so a true result simply means the cached copy is skipped
+// and the request goes to the network.
 func (r HTTPResponse[T]) Revalidate() bool {
-	return r.raw.Header.Get("Revalidate") == "true"
+	if r.raw == nil {
+		return true
+	}
+	return parseCacheControl(r.raw.Header.Get(cacheControlHeader)).has(directiveNoCache)
 }
 
-func (r HTTPResponse[T]) Cacheable() (time.Duration, bool) {
-	return time.Duration(5) * time.Minute, true
+// Cacheable reports whether the response may be stored and for how long, honoring
+// the response's Cache-Control directives and Expires header (RFC 9111).
+// Responses that carry no freshness information fall back to defaultTTL.
+//
+// Only successful responses are cacheable; no-store and max-age=0 opt out.
+func (r HTTPResponse[T]) Cacheable(defaultTTL time.Duration) (time.Duration, bool) {
+	if r.raw == nil || !r.IsSuccess() {
+		return 0, false
+	}
+
+	directives := parseCacheControl(r.raw.Header.Get(cacheControlHeader))
+	if directives.has(directiveNoStore) {
+		return 0, false
+	}
+
+	if maxAge, found := directives.duration(directiveMaxAge); found {
+		return maxAge, maxAge > 0
+	}
+
+	if ttl, found := freshnessFromExpires(r.raw.Header); found {
+		return ttl, true
+	}
+
+	return defaultTTL, defaultTTL > 0
 }

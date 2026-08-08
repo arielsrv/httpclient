@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"runtime"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/alitto/pond/v2"
@@ -19,12 +20,20 @@ import (
 // Use WithTimeout(0) to disable it and rely solely on the context deadline.
 const DefaultTimeout = 30 * time.Second
 
+// DefaultCacheTTL is how long a cacheable response is kept when the server sends
+// no freshness information (no Cache-Control max-age, no Expires).
+const DefaultCacheTTL = 5 * time.Minute
+
 type HTTPClient struct {
 	httpKeyGenerator HTTPKeyGenerator
 	kvs              *KVS
 	pool             pond.Pool
 	cacheableMethods *hashset.Set
+	// pendingWrites maps a cache key to a channel closed once its queued write
+	// has landed, so a follow-up read of the same key sees it instead of missing.
+	pendingWrites    sync.Map
 	lowLevelClient   http.Client
+	defaultCacheTTL  time.Duration
 	concurrencyLevel int
 }
 
@@ -36,6 +45,7 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 		},
 		httpKeyGenerator: defaultCacheKeyGenerator{},
 		concurrencyLevel: defaultConcurrencyLevel(),
+		defaultCacheTTL:  DefaultCacheTTL,
 		cacheableMethods: hashset.New(
 			http.MethodGet,
 			http.MethodHead,
@@ -194,6 +204,7 @@ func (r *HTTPClient) doRequest[T any](
 	headers ...http.Header,
 ) (*HTTPResponse[T], error) {
 	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
+		r.awaitPendingWrite(ctx, url)
 		value, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
 		switch {
 		case errors.Is(err, ErrCacheMiss): // nothing cached — fall through to the network
@@ -249,18 +260,60 @@ func (r *HTTPClient) doRequest[T any](
 	}
 
 	if r.cacheableMethods.Contains(request.Method) && r.cacheEnabled() {
-		if ttl, cacheable := httpResponse.Cacheable(); cacheable {
-			// The caller may cancel ctx as soon as doRequest returns, while the
-			// write is still queued — keep its values, drop its cancellation.
-			cacheCtx := context.WithoutCancel(ctx)
-			key := request.URL.String()
-			_ = r.pool.Go(func() {
-				_ = r.kvs.Set(cacheCtx, key, httpResponse, ttl)
-			})
+		if ttl, cacheable := httpResponse.Cacheable(r.defaultCacheTTL); cacheable {
+			r.cacheAsync(ctx, request.URL.String(), httpResponse, ttl)
 		}
 	}
 
 	return &httpResponse, nil
+}
+
+// cacheAsync queues the cache write on the pool and registers it in pendingWrites
+// so a read of the same key does not race ahead of it.
+func (r *HTTPClient) cacheAsync[T any](
+	ctx context.Context,
+	key string,
+	response HTTPResponse[T],
+	ttl time.Duration,
+) {
+	// The caller may cancel ctx as soon as doRequest returns, while the write is
+	// still queued — keep its values, drop its cancellation.
+	cacheCtx := context.WithoutCancel(ctx)
+
+	// Registered before submitting so the task can never finish and clean up
+	// before the entry exists.
+	done := make(chan struct{})
+	r.pendingWrites.Store(key, done)
+
+	err := r.pool.Go(func() {
+		defer func() {
+			r.pendingWrites.Delete(key)
+			close(done)
+		}()
+		_ = r.kvs.Set(cacheCtx, key, response, ttl)
+	})
+	if err != nil {
+		// Pool stopped: the task will never run, so release the waiters.
+		r.pendingWrites.Delete(key)
+		close(done)
+	}
+}
+
+// awaitPendingWrite blocks until the queued write for key lands, or until ctx is
+// done. A missing entry means there is nothing in flight.
+func (r *HTTPClient) awaitPendingWrite(ctx context.Context, key string) {
+	value, found := r.pendingWrites.Load(key)
+	if !found {
+		return
+	}
+	done, ok := value.(chan struct{})
+	if !ok {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // newRequest creates std golang request.

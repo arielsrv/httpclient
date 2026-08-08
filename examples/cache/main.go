@@ -8,20 +8,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync/atomic"
 
 	"github.com/arielsrv/httpclient"
 )
 
 type UserResponse struct {
-	ID     int    `json:"id"`
 	Name   string `json:"name"`
 	Email  string `json:"email"`
 	Header string
+	ID     int `json:"id"`
 }
 
 func main() {
+	// hits counts how many requests actually reach the origin, so the cache is
+	// visible in the output instead of having to be taken on faith.
+	var hits atomic.Int64
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
+		// The client honors Cache-Control: this response stays fresh for a minute.
+		w.Header().Set("Cache-Control", "max-age=60")
 		w.WriteHeader(http.StatusOK)
 		bytes, err := json.Marshal(UserResponse{
 			ID:     1,
@@ -32,7 +40,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		w.Write(bytes)
+		if _, err = w.Write(bytes); err != nil {
+			log.Fatal(err)
+		}
 	}))
 	server.EnableHTTP2 = true
 	defer server.Close()
@@ -43,9 +53,12 @@ func main() {
 		}),
 			runtime.NumCPU()-1,
 		))
+	// Close drains the pool that writes cache entries in the background.
+	defer httpClient.Close()
 
+	ctx := context.Background()
 	// err only represents network-level errors (connection refused, timeout, etc.)
-	response, err := httpClient.Get[UserResponse](context.Background(), server.URL, http.Header{
+	response, err := httpClient.Get[UserResponse](ctx, server.URL, http.Header{
 		"X-Request-Id": []string{"abc-123"},
 	})
 	if err != nil {
@@ -59,23 +72,24 @@ func main() {
 
 	// Data() returns the deserialized response body
 	user := response.Data()
-	fmt.Printf("  [%d] %s <%s> <%s>\n", user.ID, user.Name, user.Email, user.Header)
+	fmt.Printf("  [%d] %s <%s> <%s> (origin hits: %d)\n",
+		user.ID, user.Name, user.Email, user.Header, hits.Load())
 
-	// err only represents network-level errors (connection refused, timeout, etc.)
-	response, err = httpClient.Get[UserResponse](context.Background(), server.URL, http.Header{
-		"X-Request-Id": []string{"abc-123", "abc-124"},
+	// Same URL: served from the cache even though the headers differ — the entry
+	// is keyed by URL, and the echoed X-Request-Id proves it is the stored copy.
+	response, err = httpClient.Get[UserResponse](ctx, server.URL, http.Header{
+		"X-Request-Id": []string{"abc-124"},
 		"X-Custom":     []string{"xyz"},
 	})
 	if err != nil {
 		log.Fatalf("network error: %v", err)
 	}
 
-	// non-2xx responses are not errors — check IsSuccess() and inspect the body
 	if !response.IsSuccess() {
 		log.Fatalf("unexpected status %d: %s", response.StatusCode(), response.Body())
 	}
 
-	// Data() returns the deserialized response body
 	user = response.Data()
-	fmt.Printf("  [%d] %s <%s> <%s>\n", user.ID, user.Name, user.Email, user.Header)
+	fmt.Printf("  [%d] %s <%s> <%s> (origin hits: %d)\n",
+		user.ID, user.Name, user.Email, user.Header, hits.Load())
 }

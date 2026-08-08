@@ -37,6 +37,15 @@ func WithCache(cache Cache, concurrencyLevel int) ClientOption {
 	}
 }
 
+// WithDefaultCacheTTL sets how long responses that carry no freshness information
+// are cached. Explicit Cache-Control max-age and Expires always win over it.
+// Pass 0 to cache only what the server explicitly marks as cacheable.
+func WithDefaultCacheTTL(ttl time.Duration) ClientOption {
+	return func(c *HTTPClient) {
+		c.defaultCacheTTL = ttl
+	}
+}
+
 // WithFollowRedirects controls whether the client follows HTTP redirects (3xx).
 // By default, the standard library follows up to 10 redirects automatically.
 // Pass false to disable redirect following entirely — the first 3xx response is

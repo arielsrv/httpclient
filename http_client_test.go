@@ -1065,12 +1065,16 @@ func mustMarshalJSON(t *testing.T, v any) []byte {
 	return data
 }
 
-// --- Cache pool ---
+// --- Cache ---
 
-// countingServer replies with body and records how many requests it served.
-func countingServer(hits *atomic.Int64, body any) *httptest.Server {
+// countingServer replies with body plus the given headers, and records how many
+// requests actually reached it.
+func countingServer(hits *atomic.Int64, body any, headers map[string]string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		for k, v := range headers {
+			w.Header().Set(k, v)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(body); err != nil {
 			panic(err)
@@ -1078,27 +1082,33 @@ func countingServer(hits *atomic.Int64, body any) *httptest.Server {
 	}))
 }
 
-// TestWithCache_WritesThroughPool verifies that the cache write submitted to the
-// worker pool completes — after Close() flushes it, a second GET is served from
-// the cache and never reaches the server.
-func TestWithCache_WritesThroughPool(t *testing.T) {
-	t.Parallel()
-	var hits atomic.Int64
-	server := countingServer(&hits, testUser{ID: 7, Name: "Dave"})
-	defer server.Close()
-
-	client := httpclient.NewHTTPClient(
+// cachingClient builds a client backed by a fresh in-memory cache.
+func cachingClient(t *testing.T, opts ...httpclient.ClientOption) *httpclient.HTTPClient {
+	t.Helper()
+	all := append([]httpclient.ClientOption{
 		httpclient.WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
 			ByteSize: 1024,
 		}), 2),
-	)
+	}, opts...)
+	client := httpclient.NewHTTPClient(all...)
+	t.Cleanup(client.Close)
+	return client
+}
+
+// TestCache_ReadYourWrites verifies that a GET issued right after a cacheable one
+// sees the entry even though the write is handed to the background pool — the
+// second request must not reach the server.
+func TestCache_ReadYourWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 7, Name: "Dave"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t)
 
 	first, err := client.Get[testUser](context.Background(), server.URL)
 	require.NoError(t, err)
 	assert.True(t, first.IsSuccess())
-
-	// Close waits for the queued cache write to land.
-	client.Close()
 
 	second, err := client.Get[testUser](context.Background(), server.URL)
 	require.NoError(t, err)
@@ -1106,20 +1116,187 @@ func TestWithCache_WritesThroughPool(t *testing.T) {
 	assert.Equal(t, int64(1), hits.Load(), "second GET should be served from cache")
 }
 
+// TestCache_CloseFlushesPendingWrites verifies Close waits for queued writes.
+func TestCache_CloseFlushesPendingWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 9, Name: "Frank"}, nil)
+	defer server.Close()
+
+	cache := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: 1024})
+	client := httpclient.NewHTTPClient(httpclient.WithCache(cache, 2))
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	client.Close()
+
+	_, found, err := cache.Get(context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.True(t, found, "the queued write should have landed before Close returned")
+}
+
+func TestCache_HonorsCacheControl(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		cacheControl string
+		wantHits     int64
+	}{
+		{name: "max-age caches", cacheControl: "max-age=60", wantHits: 1},
+		{name: "public max-age caches", cacheControl: "public, max-age=60", wantHits: 1},
+		{name: "no-store skips the cache", cacheControl: "no-store", wantHits: 2},
+		{name: "max-age=0 skips the cache", cacheControl: "max-age=0", wantHits: 2},
+		{name: "no-cache forces revalidation", cacheControl: "no-cache", wantHits: 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var hits atomic.Int64
+			server := countingServer(&hits, testUser{ID: 1, Name: "Gina"}, map[string]string{
+				"Cache-Control": tc.cacheControl,
+			})
+			defer server.Close()
+
+			client := cachingClient(t)
+			for range 2 {
+				resp, err := client.Get[testUser](context.Background(), server.URL)
+				require.NoError(t, err)
+				assert.Equal(t, "Gina", resp.Data().Name)
+			}
+
+			assert.Equal(t, tc.wantHits, hits.Load())
+		})
+	}
+}
+
+// TestCache_ExpiresHeader covers the Expires fallback when Cache-Control is absent.
+func TestCache_ExpiresHeader(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		expires  time.Time
+		wantHits int64
+	}{
+		{name: "future Expires caches", expires: time.Now().Add(time.Hour), wantHits: 1},
+		{
+			name:     "past Expires falls back to the default TTL",
+			expires:  time.Now().Add(-time.Hour),
+			wantHits: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var hits atomic.Int64
+			server := countingServer(&hits, testUser{ID: 2, Name: "Hugo"}, map[string]string{
+				"Expires": tc.expires.UTC().Format(http.TimeFormat),
+			})
+			defer server.Close()
+
+			client := cachingClient(t)
+			for range 2 {
+				_, err := client.Get[testUser](context.Background(), server.URL)
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.wantHits, hits.Load())
+		})
+	}
+}
+
+// TestCache_DefaultTTLDisabled verifies WithDefaultCacheTTL(0) restricts caching
+// to responses the server explicitly marks as cacheable.
+func TestCache_DefaultTTLDisabled(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 3, Name: "Iris"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithDefaultCacheTTL(0))
+	for range 2 {
+		_, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load(), "no Cache-Control and no default TTL means no caching")
+}
+
+// TestCache_EntryExpires verifies the stored TTL is enforced: once it elapses the
+// entry is gone and the request goes back to the origin.
+func TestCache_EntryExpires(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 4, Name: "Jack"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t, httpclient.WithDefaultCacheTTL(30*time.Millisecond))
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+
+	_, err = client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), hits.Load(), "still fresh")
+
+	time.Sleep(60 * time.Millisecond)
+
+	_, err = client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), hits.Load(), "expired entry must be refetched")
+}
+
+// TestCache_ErrorResponsesAreNotCached verifies non-2xx responses never land in
+// the cache, whatever the server advertises.
+func TestCache_ErrorResponsesAreNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		resp, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.False(t, resp.IsSuccess())
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
+}
+
+// TestCache_PostIsNotCached verifies only safe methods hit the cache.
+func TestCache_PostIsNotCached(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 5, Name: "Kim"}, map[string]string{
+		"Cache-Control": "max-age=60",
+	})
+	defer server.Close()
+
+	client := cachingClient(t)
+	for range 2 {
+		_, err := client.Post[testUser](context.Background(), server.URL, testUser{ID: 5})
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, int64(2), hits.Load())
+}
+
 // TestRace_ConcurrentCacheWrites hammers a cached endpoint from many goroutines
 // so the race detector can catch unsynchronized access to the cache.
 func TestRace_ConcurrentCacheWrites(t *testing.T) {
 	t.Parallel()
 	var hits atomic.Int64
-	server := countingServer(&hits, testUser{ID: 8, Name: "Erin"})
+	server := countingServer(&hits, testUser{ID: 8, Name: "Erin"}, nil)
 	defer server.Close()
 
-	client := httpclient.NewHTTPClient(
-		httpclient.WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
-			ByteSize: 1024,
-		}), 4),
-	)
-	defer client.Close()
+	client := cachingClient(t)
 
 	var wg sync.WaitGroup
 	wg.Add(20)
@@ -1134,4 +1311,116 @@ func TestRace_ConcurrentCacheWrites(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestInMemoryCache_TTL exercises the store directly: a positive TTL expires, no
+// TTL keeps the entry.
+func TestInMemoryCache_TTL(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	cache := httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{ByteSize: 1024})
+
+	require.NoError(t, cache.Set(ctx, "sticky", "v"))
+	require.NoError(t, cache.Set(ctx, "brief", "v", 20*time.Millisecond))
+
+	_, found, err := cache.Get(ctx, "brief")
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	time.Sleep(50 * time.Millisecond)
+
+	_, found, err = cache.Get(ctx, "brief")
+	require.NoError(t, err)
+	assert.False(t, found, "entry should have expired")
+
+	_, found, err = cache.Get(ctx, "sticky")
+	require.NoError(t, err)
+	assert.True(t, found, "entry without TTL should survive")
+}
+
+// blockingCache holds every Set until release is closed, so tests can pin a cache
+// write in flight and observe what readers do meanwhile.
+type blockingCache struct {
+	release chan struct{}
+	entered chan struct{}
+}
+
+func newBlockingCache() *blockingCache {
+	return &blockingCache{
+		release: make(chan struct{}),
+		entered: make(chan struct{}, 1),
+	}
+}
+
+func (r *blockingCache) Set(
+	ctx context.Context,
+	key string,
+	value any,
+	ttl ...time.Duration,
+) error {
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	<-r.release
+	return nil
+}
+
+func (r *blockingCache) Get(ctx context.Context, key string) (any, bool, error) {
+	return nil, false, nil
+}
+
+// TestCache_AwaitPendingWriteRespectsContext verifies that waiting for an in-flight
+// cache write is bounded by the caller's context: a stalled cache must not hang
+// the next request.
+func TestCache_AwaitPendingWriteRespectsContext(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 11, Name: "Lena"}, nil)
+	defer server.Close()
+
+	cache := newBlockingCache()
+	client := httpclient.NewHTTPClient(httpclient.WithCache(cache, 2))
+
+	_, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	<-cache.entered // the write is now parked inside Set
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = client.Get[testUser](ctx, server.URL)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stalled cache write blocked the next request")
+	}
+
+	close(cache.release)
+	client.Close()
+}
+
+// TestCache_GetAfterCloseDoesNotHang verifies that requests still work once the
+// pool is stopped: the write cannot be queued, and no reader waits on it.
+func TestCache_GetAfterCloseDoesNotHang(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 12, Name: "Mona"}, nil)
+	defer server.Close()
+
+	client := cachingClient(t)
+	client.Close()
+
+	for range 2 {
+		resp, err := client.Get[testUser](context.Background(), server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, "Mona", resp.Data().Name)
+	}
+
+	assert.Equal(t, int64(2), hits.Load(), "a stopped pool cannot populate the cache")
 }

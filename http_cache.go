@@ -63,38 +63,61 @@ type Cache interface {
 	Get(ctx context.Context, key string) (any, bool, error)
 }
 
+// inMemoryEntry is a stored value with its expiry. A zero expiresAt never expires.
+type inMemoryEntry struct {
+	expiresAt time.Time
+	value     any
+}
+
 // InMemoryClientCache is a process-local Cache. Entries are written from the
-// client's background pool, so access is guarded by a mutex.
+// client's background pool, so access is guarded by a mutex. Expired entries are
+// dropped lazily on read.
 type InMemoryClientCache struct {
-	m      map[string]any
+	m      map[string]inMemoryEntry
 	config InMemoryConfig
-	mu     sync.RWMutex
+	mu     sync.Mutex
 }
 
 func NewInMemoryClientCache(config InMemoryConfig) *InMemoryClientCache {
 	return &InMemoryClientCache{
 		config: config,
-		m:      make(map[string]any),
+		m:      make(map[string]inMemoryEntry),
 	}
 }
 
+// Set stores value under key. The first ttl, when positive, bounds its lifetime.
 func (r *InMemoryClientCache) Set(
 	ctx context.Context,
 	key string,
 	value any,
 	ttl ...time.Duration,
 ) error {
+	entry := inMemoryEntry{value: value}
+	if len(ttl) > 0 && ttl[0] > 0 {
+		entry.expiresAt = time.Now().Add(ttl[0])
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.m[key] = value
+	r.m[key] = entry
 	return nil
 }
 
+// Get reports a miss for entries whose TTL has elapsed, evicting them on the way.
 func (r *InMemoryClientCache) Get(ctx context.Context, key string) (any, bool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	value, found := r.m[key]
-	return value, found, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, found := r.m[key]
+	if !found {
+		return nil, false, nil
+	}
+	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		delete(r.m, key)
+		return nil, false, nil
+	}
+
+	return entry.value, true, nil
 }
 
 type RedisConfig struct {
