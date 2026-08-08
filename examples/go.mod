@@ -5,6 +5,7 @@ go 1.27
 require github.com/arielsrv/httpclient v0.0.0
 
 require (
+	github.com/alitto/pond/v2 v2.7.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-playground/form/v4 v4.3.0 // indirect

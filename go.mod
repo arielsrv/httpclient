@@ -3,12 +3,11 @@ module github.com/arielsrv/httpclient
 go 1.27
 
 require (
+	github.com/alitto/pond/v2 v2.7.1
 	github.com/emirpasic/gods v1.18.1
 	github.com/go-playground/form/v4 v4.3.0
 	github.com/stretchr/testify v1.11.1
 )
-
-replace github.com/arielsrv/go-kvs-client v0.0.0 => ../../projects/personal/go-kvs-client
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
@@ -244,7 +243,7 @@ require (
 	go.augendre.info/arangolint v0.4.0 // indirect
 	go.augendre.info/fatcontext v0.9.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/nilaway v0.0.0-20260803001828-dc48a6814e08 // indirect
+	go.uber.org/nilaway v0.0.0-20260808063849-8649a03c818a // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

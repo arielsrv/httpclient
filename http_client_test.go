@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1062,4 +1063,75 @@ func mustMarshalJSON(t *testing.T, v any) []byte {
 	data, err := json.Marshal(v)
 	require.NoError(t, err)
 	return data
+}
+
+// --- Cache pool ---
+
+// countingServer replies with body and records how many requests it served.
+func countingServer(hits *atomic.Int64, body any) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			panic(err)
+		}
+	}))
+}
+
+// TestWithCache_WritesThroughPool verifies that the cache write submitted to the
+// worker pool completes — after Close() flushes it, a second GET is served from
+// the cache and never reaches the server.
+func TestWithCache_WritesThroughPool(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 7, Name: "Dave"})
+	defer server.Close()
+
+	client := httpclient.NewHTTPClient(
+		httpclient.WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
+			ByteSize: 1024,
+		}), 2),
+	)
+
+	first, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.True(t, first.IsSuccess())
+
+	// Close waits for the queued cache write to land.
+	client.Close()
+
+	second, err := client.Get[testUser](context.Background(), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "Dave", second.Data().Name)
+	assert.Equal(t, int64(1), hits.Load(), "second GET should be served from cache")
+}
+
+// TestRace_ConcurrentCacheWrites hammers a cached endpoint from many goroutines
+// so the race detector can catch unsynchronized access to the cache.
+func TestRace_ConcurrentCacheWrites(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int64
+	server := countingServer(&hits, testUser{ID: 8, Name: "Erin"})
+	defer server.Close()
+
+	client := httpclient.NewHTTPClient(
+		httpclient.WithCache(httpclient.NewInMemoryClientCache(httpclient.InMemoryConfig{
+			ByteSize: 1024,
+		}), 4),
+	)
+	defer client.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(20)
+
+	for range 20 {
+		go func() {
+			defer wg.Done()
+			resp, err := client.Get[testUser](context.Background(), server.URL)
+			require.NoError(t, err)
+			assert.Equal(t, "Erin", resp.Data().Name)
+		}()
+	}
+
+	wg.Wait()
 }

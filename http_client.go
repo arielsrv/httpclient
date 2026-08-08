@@ -3,6 +3,7 @@ package httpclient
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/alitto/pond/v2"
 	"github.com/emirpasic/gods/sets/hashset"
 )
 
@@ -20,7 +22,7 @@ const DefaultTimeout = 30 * time.Second
 type HTTPClient struct {
 	httpKeyGenerator HTTPKeyGenerator
 	kvs              *KVS
-	pool             *Pool
+	pool             pond.Pool
 	cacheableMethods *hashset.Set
 	lowLevelClient   http.Client
 	concurrencyLevel int
@@ -33,7 +35,7 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 			Timeout:   DefaultTimeout,
 		},
 		httpKeyGenerator: defaultCacheKeyGenerator{},
-		pool:             &Pool{ConcurrencyLevel: runtime.NumCPU() - 1},
+		concurrencyLevel: defaultConcurrencyLevel(),
 		cacheableMethods: hashset.New(
 			http.MethodGet,
 			http.MethodHead,
@@ -43,7 +45,21 @@ func NewHTTPClient(opts ...ClientOption) *HTTPClient {
 	for opt := range slices.Values(opts) {
 		opt(httpClient)
 	}
+	// Built after the options so WithCache's concurrency level actually sizes it.
+	// pond spawns workers on demand, so an unused pool costs nothing.
+	httpClient.pool = pond.NewPool(max(1, httpClient.concurrencyLevel))
 	return httpClient
+}
+
+// defaultConcurrencyLevel leaves one CPU to the caller and never drops below one worker.
+func defaultConcurrencyLevel() int {
+	return max(1, runtime.NumCPU()-1)
+}
+
+// Close stops the background pool used for cache writes and waits for the
+// pending ones to finish. The client must not be used after Close returns.
+func (r *HTTPClient) Close() {
+	r.pool.StopAndWait()
 }
 
 func (r *HTTPClient) Get[T any](
@@ -179,10 +195,11 @@ func (r *HTTPClient) doRequest[T any](
 ) (*HTTPResponse[T], error) {
 	if r.cacheableMethods.Contains(method) && r.cacheEnabled() {
 		value, err := r.kvs.Get[HTTPResponse[T]](ctx, url)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrCacheMiss): // nothing cached — fall through to the network
+		case err != nil:
 			return nil, fmt.Errorf("getting cached response: %w", err)
-		}
-		if !value.Revalidate() {
+		case !value.Revalidate():
 			return value, nil
 		}
 	}
@@ -233,11 +250,12 @@ func (r *HTTPClient) doRequest[T any](
 
 	if r.cacheableMethods.Contains(request.Method) && r.cacheEnabled() {
 		if ttl, cacheable := httpResponse.Cacheable(); cacheable {
-			r.pool.submit(func() {
-				err = r.kvs.Set(ctx, request.URL.String(), httpResponse, ttl)
-				if err != nil {
-					return
-				}
+			// The caller may cancel ctx as soon as doRequest returns, while the
+			// write is still queued — keep its values, drop its cancellation.
+			cacheCtx := context.WithoutCancel(ctx)
+			key := request.URL.String()
+			_ = r.pool.Go(func() {
+				_ = r.kvs.Set(cacheCtx, key, httpResponse, ttl)
 			})
 		}
 	}
@@ -282,12 +300,4 @@ func (r *HTTPClient) newRequest(
 
 func (r *HTTPClient) cacheEnabled() bool {
 	return r.kvs != nil
-}
-
-type Pool struct {
-	ConcurrencyLevel int
-}
-
-func (r *Pool) submit(f func()) {
-	f()
 }
