@@ -28,7 +28,10 @@ func main() {
 		httpclient.WithConnectionPool(pool),
 	)
 
-	response, err := client.Get[[]User](context.Background(), "https://gorest.co.in/public/v2/users")
+	response, err := client.Get[[]User](
+		context.Background(),
+		"https://gorest.co.in/public/v2/users",
+	)
 	if err != nil {
 		log.Fatalf("network error: %v", err)
 	}

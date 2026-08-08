@@ -46,5 +46,9 @@ func main() {
 		log.Fatalf("posts request failed %d: %s", postsResp.StatusCode(), postsResp.Body())
 	}
 
-	fmt.Printf("fetched %d users and %d posts (shared pool)\n", len(usersResp.Data()), len(postsResp.Data()))
+	fmt.Printf(
+		"fetched %d users and %d posts (shared pool)\n",
+		len(usersResp.Data()),
+		len(postsResp.Data()),
+	)
 }

@@ -46,7 +46,11 @@ func main() {
 		log.Fatalf("posts failed %d: %s", postsResp.StatusCode(), postsResp.Body())
 	}
 
-	fmt.Printf("fetched %d users and %d posts concurrently\n", len(usersResp.Data()), len(postsResp.Data()))
+	fmt.Printf(
+		"fetched %d users and %d posts concurrently\n",
+		len(usersResp.Data()),
+		len(postsResp.Data()),
+	)
 
 	// Cancellation: context timeout cancels the in-flight request
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
