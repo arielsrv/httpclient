@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch supersedes the run in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Lets the go command fetch the toolchain required by go.mod when the runner
+  # ships an older one.
+  GOTOOLCHAIN: auto
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # Follows the `go` directive in go.mod (currently 1.27, needed for
+          # generic methods).
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build module
+        run: go build ./...
+
+      - name: Build examples
+        working-directory: examples
+        run: go build ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # golangci-lint, gofumpt and mockery are declared as tool dependencies in
+      # go.mod, so their versions match what developers run locally.
+      - name: golangci-lint
+        run: go tool golangci-lint run --timeout 10m
+
+      - name: gofumpt
+        run: |
+          unformatted="$(go tool gofumpt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofumpt: the following files need formatting (run 'task lint'):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Generated mocks are up to date
+        run: |
+          go tool mockery --config .mockery.yml
+          if ! git diff --exit-code -- '*.go'; then
+            echo "::error::generated mocks are stale, run 'go tool mockery --config .mockery.yml' and commit"
+            exit 1
+          fi
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # -short leaves out the container-backed cache tests; the integration job
+      # covers those against real backends.
+      - name: Unit tests
+        run: go test -short -count 1 -covermode atomic -coverprofile coverage.out ./...
+
+      - name: Coverage summary
+        run: go tool cover -func coverage.out | tail -n 1
+
+      # The race detector needs cgo.
+      - name: Race tests
+        env:
+          CGO_ENABLED: 1
+        run: go test -race -short -count 5 ./...
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
+          if-no-files-found: warn
+
+  integration:
+    name: Integration (Redis, Memcached)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Containers are started by testcontainers from inside the tests, using the
+      # Docker daemon already present on the runner.
+      - name: Cache backend tests
+        run: go test -count 1 -timeout 15m -run 'Redis|Memcached' ./... -v
+
+  vuln:
+    name: Vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: go tool govulncheck ./...
