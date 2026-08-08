@@ -102,6 +102,7 @@ func main() {
 
 	fmt.Printf(
 		"\nThe origin was called %d times but only sent %d body: the rest were 304s or cache hits.\n",
-		requests.Load(), bodies.Load(),
+		requests.Load(),
+		bodies.Load(),
 	)
 }
