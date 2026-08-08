@@ -1,0 +1,33 @@
+# Backing services for the cache examples.
+#
+#   docker compose up -d
+#   go run ./cache_redis
+#   go run ./cache_memcached
+#   docker compose down
+#
+# Ports match the defaults in RedisConfig and MemcachedConfig, so the examples
+# need no configuration beyond the zero value.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: httpclient-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: httpclient-memcached
+    ports:
+      - "11211:11211"
+    command: ["memcached", "-m", "64"]
+    healthcheck:
+      test: ["CMD-SHELL", "echo stats | nc -w 1 127.0.0.1 11211 | grep -q uptime"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
