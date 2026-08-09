@@ -8,13 +8,6 @@ import (
 	"github.com/arielsrv/httpclient"
 )
 
-type UserResponse struct {
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Header string `json:"header"`
-	ID     int    `json:"id"`
-}
-
 func main() {
 	// The in-memory cache is backed by Ristretto: ByteSize is a real budget, and
 	// entries are evicted by cost once it is reached.
