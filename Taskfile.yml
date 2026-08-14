@@ -6,7 +6,7 @@ vars:
   # automatico intenta bajar go1.27.0 y falla. Con el nombre explicito de la RC
   # el go local la baja al module cache y la usa solo para estas tareas, sin
   # tocar el go instalado en la maquina. Override: `GOTOOLCHAIN=local task test`.
-  GOTOOLCHAIN: '{{.GOTOOLCHAIN | default "go1.27rc2"}}'
+  GOTOOLCHAIN: '{{.GOTOOLCHAIN | default "go1.27rc3"}}'
 
 env:
   CGO_ENABLED: 0
