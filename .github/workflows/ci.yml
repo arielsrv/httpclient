@@ -19,7 +19,7 @@ env:
   # Pinned in one place: go.mod requires 1.27 (generic methods) and there is no
   # stable 1.27 release yet, so setup-go cannot resolve it from go.mod.
   # Switch to '1.27.x' once it ships.
-  GO_VERSION: '1.27.0-rc.2'
+  GO_VERSION: '1.27.0-rc.3'
   # The pinned toolchain already satisfies go.mod; never try to fetch another
   # one, which would fail while 1.27 is unreleased.
   GOTOOLCHAIN: local
