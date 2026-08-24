@@ -8,13 +8,13 @@ updates:
   # the `go 1.27` directive in go.mod while 1.27 is unreleased. Re-enable this
   # block once Go 1.27 ships. Until then, `task upgrade` (go-mod-upgrade) does
   # the same job locally.
-  # - package-ecosystem: gomod
-  #   directory: /
-  #   schedule:
-  #     interval: weekly
-  #   groups:
-  #     go-modules:
-  #       patterns: ["*"]
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
