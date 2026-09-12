@@ -7,11 +7,11 @@ require (
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/eko/gocache/lib/v4 v4.2.4
-	github.com/eko/gocache/store/memcache/v4 v4.2.4
-	github.com/eko/gocache/store/redis/v4 v4.2.6
-	github.com/eko/gocache/store/ristretto/v4 v4.3.2
+	github.com/eko/gocache/store/memcache/v4 v4.2.7
+	github.com/eko/gocache/store/redis/v4 v4.2.9
+	github.com/eko/gocache/store/ristretto/v4 v4.3.5
 	github.com/emirpasic/gods v1.18.1
-	github.com/go-playground/form/v4 v4.3.0
+	github.com/go-playground/form/v4 v4.3.1
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
