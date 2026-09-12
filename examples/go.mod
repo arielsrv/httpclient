@@ -11,10 +11,10 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.4.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eko/gocache/lib/v4 v4.2.4 // indirect
-	github.com/eko/gocache/store/memcache/v4 v4.2.7 // indirect
-	github.com/eko/gocache/store/redis/v4 v4.2.9 // indirect
-	github.com/eko/gocache/store/ristretto/v4 v4.3.5 // indirect
+	github.com/eko/gocache/lib/v4 v4.4.0 // indirect
+	github.com/eko/gocache/store/memcache/v4 v4.2.10 // indirect
+	github.com/eko/gocache/store/redis/v4 v4.2.12 // indirect
+	github.com/eko/gocache/store/ristretto/v4 v4.3.8 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-playground/form/v4 v4.3.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -26,9 +26,9 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace github.com/arielsrv/httpclient => ../
