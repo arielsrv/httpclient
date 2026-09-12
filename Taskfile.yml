@@ -1,16 +1,8 @@
 # yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
 version: '3'
 
-vars:
-  # go.mod pide `go 1.27`, que todavia no tiene release: sin esto el toolchain
-  # automatico intenta bajar go1.27.0 y falla. Con el nombre explicito de la RC
-  # el go local la baja al module cache y la usa solo para estas tareas, sin
-  # tocar el go instalado en la maquina. Override: `GOTOOLCHAIN=local task test`.
-  GOTOOLCHAIN: '{{.GOTOOLCHAIN | default "go1.27"}}'
-
 env:
   CGO_ENABLED: 0
-  GOTOOLCHAIN: '{{.GOTOOLCHAIN}}'
 
 tasks:
   # DIR elige sobre que modulo del workspace corren los linters. Va por `dir:` y

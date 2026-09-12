@@ -3,11 +3,6 @@
 
 version: 2
 updates:
-  # Go module updates are paused: the updater runs in Dependabot's own image
-  # with its own Go toolchain, which cannot be pinned from here, and it fails on
-  # the `go 1.27` directive in go.mod while 1.27 is unreleased. Re-enable this
-  # block once Go 1.27 ships. Until then, `task upgrade` (go-mod-upgrade) does
-  # the same job locally.
   - package-ecosystem: gomod
     directory: /
     schedule:
