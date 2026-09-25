@@ -11,7 +11,7 @@ require (
 	github.com/eko/gocache/store/redis/v4 v4.2.12
 	github.com/eko/gocache/store/ristretto/v4 v4.3.8
 	github.com/emirpasic/gods v1.18.1
-	github.com/go-playground/form/v4 v4.3.1
+	github.com/go-playground/form/v4 v4.5.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0

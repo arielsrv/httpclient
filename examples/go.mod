@@ -16,7 +16,7 @@ require (
 	github.com/eko/gocache/store/redis/v4 v4.2.12 // indirect
 	github.com/eko/gocache/store/ristretto/v4 v4.3.8 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/go-playground/form/v4 v4.3.1 // indirect
+	github.com/go-playground/form/v4 v4.5.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
