@@ -3,7 +3,7 @@ module github.com/arielsrv/httpclient
 go 1.27.1
 
 require (
-	github.com/alitto/pond/v2 v2.7.1
+	github.com/alitto/pond/v2 v2.7.2
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/eko/gocache/lib/v4 v4.4.0
@@ -11,8 +11,8 @@ require (
 	github.com/eko/gocache/store/redis/v4 v4.2.12
 	github.com/eko/gocache/store/ristretto/v4 v4.3.8
 	github.com/emirpasic/gods v1.18.1
-	github.com/go-playground/form/v4 v4.3.1
-	github.com/redis/go-redis/v9 v9.22.0
+	github.com/go-playground/form/v4 v4.5.0
+	github.com/redis/go-redis/v9 v9.23.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
@@ -292,7 +292,7 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/nilaway v0.0.0-20260910170248-571480214735 // indirect
 	go.uber.org/zap v1.27.0 // indirect
