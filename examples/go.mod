@@ -5,7 +5,7 @@ go 1.27.2
 require github.com/arielsrv/httpclient v0.0.0
 
 require (
-	github.com/alitto/pond/v2 v2.7.2 // indirect
+	github.com/alitto/pond/v2 v2.7.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

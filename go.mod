@@ -3,7 +3,7 @@ module github.com/arielsrv/httpclient
 go 1.27.2
 
 require (
-	github.com/alitto/pond/v2 v2.7.2
+	github.com/alitto/pond/v2 v2.7.3
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/eko/gocache/lib/v4 v4.4.0
