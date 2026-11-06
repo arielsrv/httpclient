@@ -5,18 +5,18 @@ go 1.27.2
 require github.com/arielsrv/httpclient v0.0.0
 
 require (
-	github.com/alitto/pond/v2 v2.7.2 // indirect
+	github.com/alitto/pond/v2 v2.7.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.4.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eko/gocache/lib/v4 v4.4.0 // indirect
-	github.com/eko/gocache/store/memcache/v4 v4.2.10 // indirect
-	github.com/eko/gocache/store/redis/v4 v4.2.12 // indirect
+	github.com/eko/gocache/store/memcache/v4 v4.2.11 // indirect
+	github.com/eko/gocache/store/redis/v4 v4.2.13 // indirect
 	github.com/eko/gocache/store/ristretto/v4 v4.3.8 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
-	github.com/go-playground/form/v4 v4.5.0 // indirect
+	github.com/go-playground/form/v4 v4.5.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
